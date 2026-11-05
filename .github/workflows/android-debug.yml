@@ -20,10 +20,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: Install compile SDK
-        run: sdkmanager "platforms;android-36" "build-tools;35.0.0"
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ANDROID_HOME:?ANDROID_HOME not configured on runner}"
+          SDKMGR="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | sort -V | tail -1)"
+          test -x "$SDKMGR"
+          "$SDKMGR" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;35.0.0"
       - name: Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
         with:
