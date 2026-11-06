@@ -497,6 +497,10 @@ class MainActivity : ComponentActivity() {
     private fun toggleNight() {
         if (saving) return toast("Aguarda a captura atual terminar.")
         nightMode = !nightMode
+        if (nightMode && manualFocus) {
+            manualFocus = false
+            focusControlButton.text = "◎ FOCO"
+        }
         if (nightMode && mode == Mode.PRO) {
             // OEM Night extensions reject manual Camera2 exposure sessions.
             setMode(Mode.FOTO)
@@ -732,7 +736,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        val leavingNight = nightMode && next == Mode.PRO
+        if (leavingNight) {
+            nightMode = false
+            nightUsingOem = false
+            if (::nightButton.isInitialized) nightButton.text = "☾ NOITE"
+        }
         mode = next
+        if (leavingNight) startCamera()
         for (i in 0 until modeStrip.childCount) {
             val btn = modeStrip.getChildAt(i) as Button
             val selected = btn.tag == mode
@@ -797,12 +808,23 @@ class MainActivity : ComponentActivity() {
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
         frameGuide.warmTint = preset.red >= preset.blue
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
-        val contrast = (preset.contrast * 0.91f).coerceIn(0.76f, 1.32f)
-        val offset = (1f - contrast) * 128f + preset.lift * 110f
+        val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
+            .coerceIn(0.5f, 1.85f)
+        val sat = (1f + photoGrade.saturation * .70f).coerceIn(0f, 1.75f)
+        val desat = 1f - sat
+        val offset = (1f - contrast) * 128f + preset.lift * 110f +
+            photoGrade.brightness * 36f
+        val warmth = photoGrade.warmth * 17f
         val colorMatrix = floatArrayOf(
-            preset.red * contrast, 0f, 0f, 0f, offset,
-            0f, preset.green * contrast, 0f, 0f, offset,
-            0f, 0f, preset.blue * contrast, 0f, offset,
+            (sat + desat * .2126f) * preset.red * contrast,
+            desat * .7152f * contrast,
+            desat * .0722f * contrast, 0f, offset + warmth,
+            desat * .2126f * contrast,
+            (sat + desat * .7152f) * preset.green * contrast,
+            desat * .0722f * contrast, 0f, offset,
+            desat * .2126f * contrast,
+            desat * .7152f * contrast,
+            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth,
             0f, 0f, 0f, 1f, 0f
         )
         try {
@@ -820,32 +842,91 @@ class MainActivity : ComponentActivity() {
 
     private fun startCamera() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
+        val generation = ++cameraGeneration
+        capture = null
+        if (::shutterButton.isInitialized) shutterButton.isEnabled = false
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
+            if (generation != cameraGeneration || isFinishing || isDestroyed) return@addListener
             try {
                 val provider = future.get()
                 val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-                val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
-                val photo = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
-                    .build()
-                provider.unbindAll()
-                val bound = provider.bindToLifecycle(this, selector, preview, photo)
-                capture = photo
-                activeCamera = bound
-                manual = ManualCamera(bound)
-                if (manualFocus) {
-                    if (manual?.setManualFocus(focusPercent / 100f) == false) {
-                        manualFocus = false
-                        focusControlButton.text = "◎ FOCO  AF"
-                    }
+                if (nightMode && mode == Mode.FOTO) {
+                    val managerFuture = ExtensionsManager.getInstanceAsync(applicationContext, provider)
+                    managerFuture.addListener({
+                        if (generation == cameraGeneration && !isFinishing && !isDestroyed) {
+                            try {
+                                val manager = managerFuture.get()
+                                val supported = manager.isExtensionAvailable(selector, ExtensionMode.NIGHT)
+                                val selected = if (supported)
+                                    manager.getExtensionEnabledCameraSelector(selector, ExtensionMode.NIGHT)
+                                else selector
+                                bindCamera(provider, selected, supported, generation)
+                            } catch (_: Exception) {
+                                bindCamera(provider, selector, false, generation)
+                            }
+                        }
+                    }, ContextCompat.getMainExecutor(this))
+                } else {
+                    bindCamera(provider, selector, false, generation)
                 }
-                if (mode == Mode.PRO) applyManual()
             } catch (e: Exception) {
-                toast("Não foi possível iniciar a câmera: ${e.localizedMessage}")
+                toast("Falha ao iniciar câmera: ${e.localizedMessage}")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun bindCamera(
+        provider: ProcessCameraProvider,
+        selector: CameraSelector,
+        useOemNight: Boolean,
+        generation: Int
+    ) {
+        if (generation != cameraGeneration || isDestroyed || isFinishing) return
+        try {
+            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            val photo = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
+                .setFlashMode(ImageCapture.FLASH_MODE_OFF)
+                .build()
+            provider.unbindAll()
+            val bound = provider.bindToLifecycle(this, selector, preview, photo)
+            capture = photo
+            activeCamera = bound
+            nightUsingOem = nightMode && useOemNight
+            manual = try { ManualCamera(bound) } catch (_: Exception) { null }
+            if (manualFocus && !nightMode) {
+                if (manual?.setManualFocus(focusPercent / 100f) == false) {
+                    manualFocus = false
+                    focusControlButton.text = "◎ FOCO"
+                }
+            }
+            if (mode == Mode.PRO && !nightMode) applyManual()
+            if (nightMode && !nightUsingOem) {
+                // Small physical AE boost; vendor Night mode handles exposure internally.
+                val state = bound.cameraInfo.exposureState
+                if (state.isExposureCompensationSupported) {
+                    val range = state.exposureCompensationRange
+                    val index = 2.coerceIn(range.lower, range.upper)
+                    bound.cameraControl.setExposureCompensationIndex(index)
+                }
+                hintLabel.text = "NOITE • 3 QUADROS • MANTENHA FIRME"
+            } else if (nightUsingOem) {
+                hintLabel.text = "NOITE • PROCESSAMENTO DO FABRICANTE"
+            }
+            shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
+            updateFlash()
+        } catch (e: Exception) {
+            if (useOemNight) {
+                // A device may advertise the extension but still reject binding.
+                val normalSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                bindCamera(provider, normalSelector, false, generation)
+            } else {
+                capture = null
+                toast("Câmera indisponível: ${e.localizedMessage}")
+            }
+        }
     }
 
     private fun applyManual() {
