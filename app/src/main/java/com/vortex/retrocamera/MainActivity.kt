@@ -394,14 +394,28 @@ class MainActivity : ComponentActivity() {
     private fun updateFilm() {
         val preset = FilmCatalog.presets[selectedPreset]
         filmLabel.text = preset.name
-        // Illustrative tint ONLY. Full film recipe is applied after capture.
-        val tint = when {
-            preset.isDigitalCcd -> Color.rgb(90, 75, 155)
-            preset.blue > preset.red -> Color.rgb(43, 97, 89)
-            else -> Color.rgb(160, 104, 44)
+        filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
+        frameGuide.warmTint = preset.red >= preset.blue
+        // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
+        val contrast = (preset.contrast * 0.91f).coerceIn(0.76f, 1.32f)
+        val offset = (1f - contrast) * 128f + preset.lift * 110f
+        val colorMatrix = floatArrayOf(
+            preset.red * contrast, 0f, 0f, 0f, offset,
+            0f, preset.green * contrast, 0f, 0f, offset,
+            0f, 0f, preset.blue * contrast, 0f, offset,
+            0f, 0f, 0f, 1f, 0f
+        )
+        try {
+            previewView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply {
+                colorFilter = ColorMatrixColorFilter(colorMatrix)
+            })
+        } catch (_: RuntimeException) {
+            previewView.setLayerType(View.LAYER_TYPE_NONE, null)
         }
-        previewTint.setBackgroundColor(tint)
-        previewTint.alpha = .10f
+        previewTint.setBackgroundColor(
+            if (preset.red > preset.blue) 0xFFCF8B57.toInt() else 0xFF459F96.toInt()
+        )
+        previewTint.alpha = 0.035f
     }
 
     private fun startCamera() {
@@ -471,10 +485,10 @@ class MainActivity : ComponentActivity() {
                             val presented = FilmPresentation.render(
                                 result, useHalfFrame, useDateStamp, capturedAt
                             )
-                            try { saveToGallery(presented) }
+                            val photoUri = saveToGallery(presented)
+                            runOnUiThread { onPhotoSaved(photoUri) }
                             finally { if (presented !== result) presented.recycle() }
                         } finally { result.recycle() }
-                        runOnUiThread { finishCapture("FOTO SALVA NA GALERIA ✓") }
                     } catch (e: Exception) {
                         runOnUiThread { finishCapture("Falha ao salvar foto"); toast(e.localizedMessage ?: "Erro") }
                     } finally { tempFile.delete() }
@@ -510,6 +524,32 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun onPhotoSaved(uri: Uri) {
+        val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
+        val count = prefs.getInt("exposure_count", 0) + 1
+        prefs.edit().putString("latest_photo_uri", uri.toString())
+            .putInt("exposure_count", count).apply()
+        exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
+        finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
+        refreshGalleryThumbnail(uri)
+    }
+
+    private fun refreshGalleryThumbnail(photoUri: Uri? = null) {
+        val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
+        exposureDisplay.text = "EXPO " + prefs.getInt("exposure_count", 0)
+            .toString().padStart(3, '0')
+        val target = photoUri ?: prefs.getString("latest_photo_uri", null)?.let { Uri.parse(it) }
+        if (target == null) return
+        io.execute {
+            val bitmap = try {
+                contentResolver.loadThumbnail(target, Size(dp(120), dp(120)), null)
+            } catch (_: Exception) { null }
+            if (bitmap != null) runOnUiThread {
+                if (!isFinishing && !isDestroyed) galleryThumb.setImageBitmap(bitmap)
+            }
+        }
+    }
+
     private fun finishCapture(message: String) {
         saving = false
         shutterButton.isEnabled = mode == Mode.FOTO || mode == Mode.PRO
@@ -525,6 +565,11 @@ class MainActivity : ComponentActivity() {
         }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+
+    override fun onResume() {
+        super.onResume()
+        if (::galleryThumb.isInitialized) refreshGalleryThumbnail()
+    }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
