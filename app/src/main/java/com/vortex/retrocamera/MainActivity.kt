@@ -501,8 +501,8 @@ class MainActivity : ComponentActivity() {
             manualFocus = false
             focusControlButton.text = "◎ FOCO"
         }
-        if (nightMode && mode == Mode.PRO) {
-            // OEM Night extensions reject manual Camera2 exposure sessions.
+        if (nightMode && mode != Mode.FOTO) {
+            // Night capture is a still-photography feature, never a fake video mode.
             setMode(Mode.FOTO)
         }
         nightButton.text = if (nightMode) "☾ LIGADO" else "☾ NOITE"
@@ -662,6 +662,10 @@ class MainActivity : ComponentActivity() {
             }.text = "AF"
 
             rowAction(content, "Foco manual", "Ajuste de dioptrias por deslizamento") { _ ->
+                if (nightMode) {
+                    toast("Desative o modo noturno para usar o foco manual.")
+                    return@rowAction
+                }
                 val controller = manual
                 if (controller?.supportsManualFocus != true) {
                     toast("Esta lente não permite foco manual por hardware.")
