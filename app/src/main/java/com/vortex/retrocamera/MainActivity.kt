@@ -2,8 +2,11 @@ package com.vortex.retrocamera
 
 import android.Manifest
 import android.content.ContentValues
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
@@ -14,12 +17,14 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.view.Gravity
+import android.util.Size
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -71,7 +76,10 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
-    private lateinit var frameGuide: View
+    private lateinit var frameGuide: RetroViewfinderOverlay
+    private lateinit var galleryThumb: ImageView
+    private lateinit var exposureDisplay: TextView
+    private lateinit var filmTagline: TextView
     private lateinit var filmLabel: TextView
     private lateinit var hintLabel: TextView
     private lateinit var saveLabel: TextView
@@ -101,164 +109,213 @@ class MainActivity : ComponentActivity() {
         }
         setContentView(root)
 
-        root.addView(LinearLayout(this).apply {
+        // Physical-camera-inspired matte graphite chassis.
+        val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(14), dp(20), dp(12))
-            addView(text("VORTEX", 23f, Color.WHITE, Typeface.BOLD))
-            addView(text("RETRO CAMERA  ·  by Vortex", 10f, muted).apply { letterSpacing = .14f })
+            setPadding(dp(18), dp(11), dp(18), dp(11))
+            background = rounded(0xFF1F2025.toInt(), 14, 0xFF55525A.toInt())
+        }
+        val brandRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        brandRow.addView(text("●", 12f, 0xFFDB503B.toInt()))
+        brandRow.addView(text("  VORTEX", 19f, Color.WHITE, Typeface.BOLD).apply {
+            letterSpacing = 0.12f
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        exposureDisplay = text("EXPO 000", 11f, accent, Typeface.BOLD).apply {
+            typeface = Typeface.MONOSPACE
+        }
+        brandRow.addView(exposureDisplay)
+        topBar.addView(brandRow)
+        topBar.addView(text("RETRO CAMERA    •    FILM SERIES 2000", 9f, muted).apply {
+            letterSpacing = 0.12f
+        })
+        root.addView(topBar, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(dp(9), dp(4), dp(9), dp(8))
         })
 
-        val viewport = FrameLayout(this)
-        root.addView(viewport, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val viewFrame = FrameLayout(this).apply {
+            background = rounded(0xFF050506.toInt(), 20, 0xFF706C70.toInt())
+            clipToOutline = true
+        }
+        root.addView(viewFrame, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            setMargins(dp(10), 0, dp(10), dp(5))
+        })
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
             setBackgroundColor(Color.BLACK)
         }
-        viewport.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        viewFrame.addView(previewView, FrameLayout.LayoutParams(-1, -1))
         previewTint = View(this).apply { isClickable = false }
-        viewport.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
-        frameGuide = object : View(this) {
-            private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(195, 255, 245, 220)
-                style = Paint.Style.STROKE
-                strokeWidth = dp(2).toFloat()
-            }
-            override fun onDraw(canvas: Canvas) {
-                super.onDraw(canvas)
-                if (!halfFrame) return
-                val frameHeight = minOf(height * 0.88f, width * 0.90f / 0.75f)
-                val frameWidth = frameHeight * 0.75f
-                val left = (width - frameWidth) / 2f
-                val top = (height - frameHeight) / 2f
-                canvas.drawRect(left, top, left + frameWidth, top + frameHeight, stroke)
-            }
-        }.apply { isClickable = false }
-        viewport.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
+        viewFrame.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
+        frameGuide = RetroViewfinderOverlay(this).apply { isClickable = false }
+        viewFrame.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
 
-        filmLabel = text("KODAK GOLD 200", 12f, Color.WHITE, Typeface.BOLD)
         val filmBadge = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(0x990B0D12.toInt())
-            setPadding(dp(14), dp(9), dp(14), dp(9))
-            addView(filmLabel)
-            addView(text("PRÉVIA INDICATIVA · FILTRO AO SALVAR", 9f, Color.LTGRAY))
+            background = rounded(0xC20B0C0F.toInt(), 9, 0x664C4C52)
+            setPadding(dp(11), dp(8), dp(11), dp(8))
         }
-        viewport.addView(filmBadge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
-            setMargins(dp(12), dp(14), dp(12), dp(14))
+        filmLabel = text("KODAK GOLD 200", 12f, Color.WHITE, Typeface.BOLD).apply {
+            typeface = Typeface.MONOSPACE
+        }
+        filmTagline = text("SOL DE VERÃO • 2001", 9f, 0xFFDFC4A0.toInt())
+        filmBadge.addView(filmLabel)
+        filmBadge.addView(filmTagline)
+        viewFrame.addView(filmBadge, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.START).apply {
+            setMargins(dp(12), dp(12), dp(12), dp(12))
         })
-
-        hintLabel = text("", 12f, Color.WHITE).apply {
+        hintLabel = text("PRÉVIA RETRÔ APROXIMADA • EFEITO FINAL AO SALVAR", 9f, Color.WHITE).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(16), dp(10), dp(16), dp(10))
-            setBackgroundColor(0xAA0B0D12.toInt())
+            background = rounded(0xAB0B0C10.toInt(), 9)
+            setPadding(dp(6), dp(8), dp(6), dp(8))
         }
-        viewport.addView(hintLabel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+        viewFrame.addView(hintLabel, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
             setMargins(dp(12), 0, dp(12), dp(12))
         })
-        modeStrip = LinearLayout(this).apply {
-            setPadding(dp(12), dp(12), dp(12), dp(10))
+
+        val stripHeading = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16), dp(4), dp(16), 0)
+        }
+        stripHeading.addView(text("ESCOLHA A PELÍCULA", 10f, 0xFFE6C9A7.toInt(), Typeface.BOLD).apply {
+            letterSpacing = 0.12f
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        stripHeading.addView(text("35 MM  /  RETRÔ", 9f, muted))
+        root.addView(stripHeading)
+        val scroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        presetStrip = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(7), dp(3), dp(7), dp(3))
+        }
+        scroll.addView(presetStrip)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(57)))
+        buildPresetChips()
+
+        val settingsRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
+            setPadding(dp(12), 0, dp(12), dp(3))
+        }
+        settingsRow.addView(smallButton("HALF FRAME OFF") {
+            halfFrame = !halfFrame
+            frameGuide.halfFrame = halfFrame
+            it.text = if (halfFrame) "HALF FRAME ON" else "HALF FRAME OFF"
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        settingsRow.addView(smallButton("DATA OFF") {
+            dateStamp = !dateStamp
+            it.text = if (dateStamp) "DATA ON" else "DATA OFF"
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        settingsRow.addView(smallButton("◷ 0s") {
+            timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
+            it.text = "◷ " + timerSeconds + "s"
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        root.addView(settingsRow)
+
+        modeStrip = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(13), dp(2), dp(13), dp(2))
         }
         root.addView(modeStrip)
         for (m in Mode.entries) {
             val button = Button(this).apply {
-                text = m.name
-                isAllCaps = false
-                textSize = 11f
-                setOnClickListener { setMode(m) }
                 tag = m
+                text = when (m) {
+                    Mode.FOTO -> "FOTO"
+                    Mode.PANORAMA -> "PANORAMA"
+                    Mode.PRO -> "PRO"
+                    Mode.VIDEO -> "VÍDEO"
+                }
+                isAllCaps = false
+                textSize = 10f
+                background = rounded(0xFF27272D.toInt(), 10, 0xFF45434B.toInt())
+                setOnClickListener { setMode(m) }
             }
-            modeStrip.addView(button, LinearLayout.LayoutParams(0, dp(48), 1f))
+            modeStrip.addView(button, LinearLayout.LayoutParams(0, dp(39), 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
+            })
         }
-        val scroll = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-        }
-        presetStrip = LinearLayout(this).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(4))
-        }
-        scroll.addView(presetStrip)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, dp(58)))
-        buildPresetChips()
-
-        val formatOptions = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(12), 0, dp(12), dp(4))
-        }
-        val halfFrameButton = Button(this).apply {
-            text = "HALF FRAME  OFF"
-            isAllCaps = false
-            textSize = 11f
-            setOnClickListener {
-                halfFrame = !halfFrame
-                text = if (halfFrame) "HALF FRAME  ON" else "HALF FRAME  OFF"
-                frameGuide.invalidate()
-            }
-        }
-        formatOptions.addView(halfFrameButton, LinearLayout.LayoutParams(0, dp(44), 1f))
-        val dateButton = Button(this).apply {
-            text = "DATA  OFF"
-            isAllCaps = false
-            textSize = 11f
-            setOnClickListener {
-                dateStamp = !dateStamp
-                text = if (dateStamp) "DATA  ON" else "DATA  OFF"
-            }
-        }
-        formatOptions.addView(dateButton, LinearLayout.LayoutParams(0, dp(44), 1f))
-        root.addView(formatOptions)
 
         proPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(6), dp(16), dp(6))
+            setPadding(dp(16), dp(4), dp(16), dp(4))
             visibility = View.GONE
         }
         root.addView(proPanel)
         buildProPanel()
 
         val actionRow = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(18), dp(4), dp(18), dp(5))
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(5), dp(13), dp(5))
+            background = rounded(0xFF202126.toInt(), 20, 0xFF47464D.toInt())
         }
-        val flip = Button(this).apply {
-            text = "↺"
-            contentDescription = "Trocar câmera"
-            textSize = 21f
-            setOnClickListener {
-                lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
-                    CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
-                startCamera()
-            }
+        val galleryButton = FrameLayout(this).apply {
+            background = rounded(0xFF333237.toInt(), 13, accent)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Abrir as fotos tiradas no Vortex Retro Camera"
+            setOnClickListener { startActivity(Intent(this@MainActivity, GalleryActivity::class.java)) }
         }
-        actionRow.addView(flip, LinearLayout.LayoutParams(0, dp(68), 1f))
+        galleryThumb = ImageView(this).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "Galeria de fotografias"
+            setImageResource(android.R.drawable.ic_menu_gallery)
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
+        galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1))
+        actionRow.addView(galleryButton, LinearLayout.LayoutParams(dp(59), dp(59)))
+
+        val center = FrameLayout(this)
         shutterButton = Button(this).apply {
             text = "●"
-            textSize = 38f
-            setTextColor(accent)
-            contentDescription = "Fotografar"
+            textSize = 32f
+            setTextColor(0xFF25252A.toInt())
+            contentDescription = "Disparar fotografia"
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFFF2EDE4.toInt())
+                setStroke(dp(5), 0xFFA8A3A0.toInt())
+            }
             setOnClickListener {
                 if (mode == Mode.FOTO || mode == Mode.PRO) takePhoto()
-                else toast("Este modo entra em uma etapa posterior do desenvolvimento.")
+                else toast("Este modo ainda está em desenvolvimento.")
             }
         }
-        actionRow.addView(shutterButton, LinearLayout.LayoutParams(0, dp(74), 2f))
-        val timer = Button(this).apply {
-            text = "0s"
-            setOnClickListener {
-                timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
-                text = "${timerSeconds}s"
-            }
-        }
-        actionRow.addView(timer, LinearLayout.LayoutParams(0, dp(68), 1f))
-        root.addView(actionRow)
-        saveLabel = text("OFFLINE  •  SALVAR NA GALERIA", 10f, muted).apply {
+        center.addView(shutterButton, FrameLayout.LayoutParams(dp(78), dp(78), Gravity.CENTER))
+        actionRow.addView(center, LinearLayout.LayoutParams(0, dp(84), 1f))
+        actionRow.addView(smallButton("⟳") {
+            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+                CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+            startCamera()
+        }.apply { contentDescription = "Alternar câmera frontal e traseira"; textSize = 24f },
+            LinearLayout.LayoutParams(dp(59), dp(59)))
+        root.addView(actionRow, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(dp(10), dp(2), dp(10), dp(4))
+        })
+
+        saveLabel = text("TOQUE NA MINIATURA PARA ABRIR SUAS FOTOS", 9f, muted).apply {
             gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(11))
+            setPadding(0, 0, 0, dp(6))
         }
         root.addView(saveLabel)
         setMode(Mode.FOTO)
         updateFilm()
+        refreshGalleryThumbnail()
+    }
+
+    private fun rounded(color: Int, radius: Int, border: Int = color): GradientDrawable =
+        GradientDrawable().apply {
+            cornerRadius = dp(radius).toFloat()
+            setColor(color)
+            setStroke(dp(1), border)
+        }
+
+    private fun smallButton(label: String, action: (Button) -> Unit): Button = Button(this).apply {
+        text = label
+        textSize = 10f
+        typeface = Typeface.MONOSPACE
+        isAllCaps = false
+        setTextColor(0xFFDFD6CC.toInt())
+        background = rounded(0xFF29292F.toInt(), 10, 0xFF44444A.toInt())
+        setOnClickListener { action(this) }
     }
 
     private fun buildPresetChips() {
