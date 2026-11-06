@@ -3,7 +3,9 @@ package com.vortex.retrocamera
 import android.Manifest
 import android.content.ContentValues
 import android.content.pm.PackageManager
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
@@ -36,6 +38,7 @@ import com.vortex.retrocamera.camera.ManualCamera
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.FilmPreset
 import com.vortex.retrocamera.film.FilmProcessor
+import com.vortex.retrocamera.film.FilmPresentation
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,6 +57,8 @@ class MainActivity : ComponentActivity() {
     private val io = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private var selectedPreset = 0
+    private var halfFrame = false
+    private var dateStamp = false
     private var mode = Mode.FOTO
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
@@ -66,6 +71,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
+    private lateinit var frameGuide: View
     private lateinit var filmLabel: TextView
     private lateinit var hintLabel: TextView
     private lateinit var saveLabel: TextView
@@ -112,6 +118,23 @@ class MainActivity : ComponentActivity() {
         viewport.addView(previewView, FrameLayout.LayoutParams(-1, -1))
         previewTint = View(this).apply { isClickable = false }
         viewport.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
+        frameGuide = object : View(this) {
+            private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.argb(195, 255, 245, 220)
+                style = Paint.Style.STROKE
+                strokeWidth = dp(2).toFloat()
+            }
+            override fun onDraw(canvas: Canvas) {
+                super.onDraw(canvas)
+                if (!halfFrame) return
+                val frameHeight = minOf(height * 0.88f, width * 0.90f / 0.75f)
+                val frameWidth = frameHeight * 0.75f
+                val left = (width - frameWidth) / 2f
+                val top = (height - frameHeight) / 2f
+                canvas.drawRect(left, top, left + frameWidth, top + frameHeight, stroke)
+            }
+        }.apply { isClickable = false }
+        viewport.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
 
         filmLabel = text("KODAK GOLD 200", 12f, Color.WHITE, Typeface.BOLD)
         val filmBadge = LinearLayout(this).apply {
@@ -158,6 +181,33 @@ class MainActivity : ComponentActivity() {
         scroll.addView(presetStrip)
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(58)))
         buildPresetChips()
+
+        val formatOptions = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(12), 0, dp(12), dp(4))
+        }
+        val halfFrameButton = Button(this).apply {
+            text = "HALF FRAME  OFF"
+            isAllCaps = false
+            textSize = 11f
+            setOnClickListener {
+                halfFrame = !halfFrame
+                text = if (halfFrame) "HALF FRAME  ON" else "HALF FRAME  OFF"
+                frameGuide.invalidate()
+            }
+        }
+        formatOptions.addView(halfFrameButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        val dateButton = Button(this).apply {
+            text = "DATA  OFF"
+            isAllCaps = false
+            textSize = 11f
+            setOnClickListener {
+                dateStamp = !dateStamp
+                text = if (dateStamp) "DATA  ON" else "DATA  OFF"
+            }
+        }
+        formatOptions.addView(dateButton, LinearLayout.LayoutParams(0, dp(44), 1f))
+        root.addView(formatOptions)
 
         proPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -348,6 +398,9 @@ class MainActivity : ComponentActivity() {
         shutterButton.isEnabled = false
         saveLabel.text = "PROCESSANDO FILME…"
         val preset: FilmPreset = FilmCatalog.presets[selectedPreset]
+        val useHalfFrame = halfFrame
+        val useDateStamp = dateStamp
+        val capturedAt = System.currentTimeMillis()
         val tempFile = File.createTempFile("vortex-", ".jpg", cacheDir)
         imageCapture.takePicture(
             ImageCapture.OutputFileOptions.Builder(tempFile).build(), io,
@@ -357,8 +410,13 @@ class MainActivity : ComponentActivity() {
                         val source = FilmProcessor.readUpright(tempFile)
                         val result = try { FilmProcessor.process(source, preset) }
                         finally { source.recycle() }
-                        try { saveToGallery(result) }
-                        finally { result.recycle() }
+                        try {
+                            val presented = FilmPresentation.render(
+                                result, useHalfFrame, useDateStamp, capturedAt
+                            )
+                            try { saveToGallery(presented) }
+                            finally { if (presented !== result) presented.recycle() }
+                        } finally { result.recycle() }
                         runOnUiThread { finishCapture("FOTO SALVA NA GALERIA ✓") }
                     } catch (e: Exception) {
                         runOnUiThread { finishCapture("Falha ao salvar foto"); toast(e.localizedMessage ?: "Erro") }
