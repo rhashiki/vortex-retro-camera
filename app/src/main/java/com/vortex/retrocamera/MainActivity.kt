@@ -29,6 +29,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
@@ -42,16 +43,20 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
+import androidx.camera.extensions.ExtensionMode
+import androidx.camera.extensions.ExtensionsManager
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.vortex.retrocamera.camera.ManualCamera
+import com.vortex.retrocamera.camera.NightFrameFusion
 import com.vortex.retrocamera.audio.MechanicalShutter
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.FilmPreset
 import com.vortex.retrocamera.film.FilmProcessor
 import com.vortex.retrocamera.film.FilmFxSettings
 import com.vortex.retrocamera.film.FilmPresentation
+import com.vortex.retrocamera.film.PhotoGrade
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -64,6 +69,7 @@ import java.util.concurrent.TimeUnit
  */
 class MainActivity : ComponentActivity() {
     private enum class Mode { FOTO, PANORAMA, PRO, VIDEO }
+    private enum class Flash { OFF, AUTO, ON }
 
     private val bg = Color.rgb(11, 13, 18)
     private val accent = Color.rgb(230, 199, 160)
@@ -79,6 +85,11 @@ class MainActivity : ComponentActivity() {
     private var grainStrength = 1.6f
     private var burnChance = 0.16f
     private var soundEnabled = true
+    private var photoGrade = PhotoGrade()
+    private var flashSetting = Flash.OFF
+    private var nightMode = false
+    private var nightUsingOem = false
+    private var cameraGeneration = 0
     private var mode = Mode.FOTO
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
@@ -95,6 +106,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var focusMarker: View
     private lateinit var viewfinderFrame: FrameLayout
     private lateinit var focusControlButton: Button
+    private lateinit var nightButton: Button
+    private lateinit var flashButton: Button
     private lateinit var galleryThumb: ImageView
     private lateinit var exposureDisplay: TextView
     private lateinit var filmTagline: TextView
@@ -149,6 +162,12 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.MONOSPACE
         }
         brandRow.addView(exposureDisplay)
+        brandRow.addView(smallButton("⚙") { showOptionsSheet() }.apply {
+            contentDescription = "Configurações e textura da câmera"
+            textSize = 15f
+        }, LinearLayout.LayoutParams(dp(48), dp(43)).apply {
+            setMargins(dp(10), 0, 0, 0)
+        })
         topBar.addView(brandRow)
         topBar.addView(text("RETRO CAMERA    •    FILM SERIES 2000", 9f, muted).apply {
             letterSpacing = 0.12f
@@ -234,25 +253,27 @@ class MainActivity : ComponentActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(57)))
         buildPresetChips()
 
-        // Quiet, compact toolbar: detailed controls live in bottom sheets.
+        // Capture-first toolbar: focus, tonal controls, actual night, real flash.
         val quickRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(10), dp(1), dp(10), dp(5))
+            setPadding(dp(10), dp(2), dp(10), dp(4))
         }
-        focusControlButton = smallButton("◎ FOCO  AF") { showFocusSheet() }.apply {
-            contentDescription = "Foco automático ou manual"
-        }
-        quickRow.addView(focusControlButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-            setMargins(dp(3), 0, dp(3), 0)
+        focusControlButton = smallButton("◎ FOCO") { showFocusSheet() }
+        quickRow.addView(focusControlButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
         })
-        quickRow.addView(smallButton("◉  TEXTURA") { showFilmSheet() },
-            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(3), 0, dp(3), 0)
+        quickRow.addView(smallButton("◐ LUZ") { showGradeSheet() },
+            LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
             })
-        quickRow.addView(smallButton("⚙  AJUSTES") { showOptionsSheet() },
-            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(3), 0, dp(3), 0)
-            })
+        nightButton = smallButton("☾ NOITE") { toggleNight() }
+        quickRow.addView(nightButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        flashButton = smallButton("⚡ OFF") { cycleFlash() }
+        quickRow.addView(flashButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
         root.addView(quickRow)
 
         modeStrip = LinearLayout(this).apply {
@@ -388,7 +409,19 @@ class MainActivity : ComponentActivity() {
             letterSpacing = 0.16f
             setPadding(0, dp(3), 0, dp(15))
         })
-        build(surface)
+        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        build(details)
+        val scroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val limit = (resources.displayMetrics.heightPixels * 0.63f).toInt()
+                super.onMeasure(
+                    widthMeasureSpec,
+                    View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST)
+                )
+            }
+        }
+        scroll.addView(details)
+        surface.addView(scroll)
         dialog.setContentView(surface)
         dialog.window?.apply {
             setBackgroundDrawableResource(android.R.color.transparent)
@@ -424,8 +457,127 @@ class MainActivity : ComponentActivity() {
         return button
     }
 
+    private fun cycleFlash() {
+        if (nightMode) {
+            toast("No modo noturno, o flash fica desligado. Desativa a Noite para usar flash.")
+            return
+        }
+        val available = activeCamera?.cameraInfo?.hasFlashUnit() ?: false
+        if (!available) {
+            toast("A lente selecionada não possui flash físico.")
+            flashSetting = Flash.OFF
+        } else {
+            flashSetting = when (flashSetting) {
+                Flash.OFF -> Flash.AUTO
+                Flash.AUTO -> Flash.ON
+                Flash.ON -> Flash.OFF
+            }
+        }
+        updateFlash()
+    }
+
+    private fun updateFlash() {
+        val available = activeCamera?.cameraInfo?.hasFlashUnit() ?: false
+        val setting = if (nightMode || !available) Flash.OFF else flashSetting
+        capture?.flashMode = when (setting) {
+            Flash.OFF -> ImageCapture.FLASH_MODE_OFF
+            Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
+            Flash.ON -> ImageCapture.FLASH_MODE_ON
+        }
+        flashButton.text = when {
+            nightMode -> "⚡ NOITE"
+            !available -> "⚡ N/A"
+            setting == Flash.AUTO -> "⚡ AUTO"
+            setting == Flash.ON -> "⚡ ON"
+            else -> "⚡ OFF"
+        }
+    }
+
+    private fun toggleNight() {
+        if (saving) return toast("Aguarda a captura atual terminar.")
+        nightMode = !nightMode
+        if (nightMode && manualFocus) {
+            manualFocus = false
+            focusControlButton.text = "◎ FOCO"
+        }
+        if (nightMode && mode != Mode.FOTO) {
+            // Night capture is a still-photography feature, never a fake video mode.
+            setMode(Mode.FOTO)
+        }
+        nightButton.text = if (nightMode) "☾ LIGADO" else "☾ NOITE"
+        if (nightMode) {
+            hintLabel.text = "NOITE: mantenha o celular parado durante a captura"
+            toast("Modo noturno: captura com fusão de imagens. Segura o celular firme.")
+        }
+        startCamera()
+    }
+
+    private fun gradeSlider(
+        parent: LinearLayout,
+        label: String,
+        value: Float,
+        onChange: (Float) -> Unit
+    ) {
+        val title = text("$label  ${(value * 100).toInt().let { if (it > 0) "+$it" else "$it" }}",
+            12f, accent, Typeface.BOLD).apply {
+            setPadding(0, dp(7), 0, 0)
+        }
+        parent.addView(title)
+        parent.addView(SeekBar(this).apply {
+            max = 200
+            progress = ((value.coerceIn(-1f, 1f) + 1f) * 100).toInt()
+            setOnSeekBarChangeListener(simpleSeek { position ->
+                val current = (position - 100) / 100f
+                onChange(current)
+                val number = position - 100
+                title.text = "$label  " + (if (number > 0) "+$number" else "$number")
+                updateFilm()
+            })
+        })
+    }
+
+    private fun showGradeSheet() {
+        showSheet("Laboratório de luz") { content ->
+            content.addView(text(
+                "Ajustes aplicados à fotografia final, preservando a identidade do filme escolhido.",
+                10f, muted
+            ).apply { setPadding(0, 0, 0, dp(7)) })
+            gradeSlider(content, "BRILHO", photoGrade.brightness) {
+                photoGrade = photoGrade.copy(brightness = it)
+            }
+            gradeSlider(content, "CONTRASTE", photoGrade.contrast) {
+                photoGrade = photoGrade.copy(contrast = it)
+            }
+            gradeSlider(content, "SOMBRAS", photoGrade.shadows) {
+                photoGrade = photoGrade.copy(shadows = it)
+            }
+            gradeSlider(content, "REALCES", photoGrade.highlights) {
+                photoGrade = photoGrade.copy(highlights = it)
+            }
+            gradeSlider(content, "SATURAÇÃO", photoGrade.saturation) {
+                photoGrade = photoGrade.copy(saturation = it)
+            }
+            gradeSlider(content, "TEMPERATURA", photoGrade.warmth) {
+                photoGrade = photoGrade.copy(warmth = it)
+            }
+            content.addView(smallButton("RESTAURAR PADRÕES") {
+                photoGrade = PhotoGrade()
+                updateFilm()
+                toast("Ajustes zerados. Reabre o painel para atualizar os controles.")
+            }, LinearLayout.LayoutParams(-1, dp(48)))
+            content.addView(text(
+                "A prévia mostra cor/contraste aproximados; sombras e realces completos são processados ao fotografar.",
+                9f, muted
+            ))
+        }
+    }
+
     private fun showOptionsSheet() {
         showSheet("Ajustes da câmera") { content ->
+            rowAction(content, "Textura da película", "Granulação e queima de filme") {
+                showFilmSheet()
+            }.text = "ABRIR"
+
             rowAction(content, "Half Frame", "Enquadramento vertical 3:4") { button ->
                 halfFrame = !halfFrame
                 frameGuide.halfFrame = halfFrame
@@ -509,6 +661,10 @@ class MainActivity : ComponentActivity() {
             }.text = "AF"
 
             rowAction(content, "Foco manual", "Ajuste de dioptrias por deslizamento") { _ ->
+                if (nightMode) {
+                    toast("Desative o modo noturno para usar o foco manual.")
+                    return@rowAction
+                }
                 val controller = manual
                 if (controller?.supportsManualFocus != true) {
                     toast("Esta lente não permite foco manual por hardware.")
@@ -583,7 +739,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        val leavingNight = nightMode && next == Mode.PRO
+        if (leavingNight) {
+            nightMode = false
+            nightUsingOem = false
+            if (::nightButton.isInitialized) nightButton.text = "☾ NOITE"
+        }
         mode = next
+        if (leavingNight) startCamera()
         for (i in 0 until modeStrip.childCount) {
             val btn = modeStrip.getChildAt(i) as Button
             val selected = btn.tag == mode
@@ -648,12 +811,23 @@ class MainActivity : ComponentActivity() {
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
         frameGuide.warmTint = preset.red >= preset.blue
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
-        val contrast = (preset.contrast * 0.91f).coerceIn(0.76f, 1.32f)
-        val offset = (1f - contrast) * 128f + preset.lift * 110f
+        val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
+            .coerceIn(0.5f, 1.85f)
+        val sat = (1f + photoGrade.saturation * .70f).coerceIn(0f, 1.75f)
+        val desat = 1f - sat
+        val offset = (1f - contrast) * 128f + preset.lift * 110f +
+            photoGrade.brightness * 36f
+        val warmth = photoGrade.warmth * 17f
         val colorMatrix = floatArrayOf(
-            preset.red * contrast, 0f, 0f, 0f, offset,
-            0f, preset.green * contrast, 0f, 0f, offset,
-            0f, 0f, preset.blue * contrast, 0f, offset,
+            (sat + desat * .2126f) * preset.red * contrast,
+            desat * .7152f * contrast,
+            desat * .0722f * contrast, 0f, offset + warmth,
+            desat * .2126f * contrast,
+            (sat + desat * .7152f) * preset.green * contrast,
+            desat * .0722f * contrast, 0f, offset,
+            desat * .2126f * contrast,
+            desat * .7152f * contrast,
+            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth,
             0f, 0f, 0f, 1f, 0f
         )
         try {
@@ -671,32 +845,91 @@ class MainActivity : ComponentActivity() {
 
     private fun startCamera() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
+        val generation = ++cameraGeneration
+        capture = null
+        if (::shutterButton.isInitialized) shutterButton.isEnabled = false
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
+            if (generation != cameraGeneration || isFinishing || isDestroyed) return@addListener
             try {
                 val provider = future.get()
                 val selector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
-                val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
-                val photo = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                    .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
-                    .build()
-                provider.unbindAll()
-                val bound = provider.bindToLifecycle(this, selector, preview, photo)
-                capture = photo
-                activeCamera = bound
-                manual = ManualCamera(bound)
-                if (manualFocus) {
-                    if (manual?.setManualFocus(focusPercent / 100f) == false) {
-                        manualFocus = false
-                        focusControlButton.text = "◎ FOCO  AF"
-                    }
+                if (nightMode && mode == Mode.FOTO) {
+                    val managerFuture = ExtensionsManager.getInstanceAsync(applicationContext, provider)
+                    managerFuture.addListener({
+                        if (generation == cameraGeneration && !isFinishing && !isDestroyed) {
+                            try {
+                                val manager = managerFuture.get()
+                                val supported = manager.isExtensionAvailable(selector, ExtensionMode.NIGHT)
+                                val selected = if (supported)
+                                    manager.getExtensionEnabledCameraSelector(selector, ExtensionMode.NIGHT)
+                                else selector
+                                bindCamera(provider, selected, supported, generation)
+                            } catch (_: Exception) {
+                                bindCamera(provider, selector, false, generation)
+                            }
+                        }
+                    }, ContextCompat.getMainExecutor(this))
+                } else {
+                    bindCamera(provider, selector, false, generation)
                 }
-                if (mode == Mode.PRO) applyManual()
             } catch (e: Exception) {
-                toast("Não foi possível iniciar a câmera: ${e.localizedMessage}")
+                toast("Falha ao iniciar câmera: ${e.localizedMessage}")
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    private fun bindCamera(
+        provider: ProcessCameraProvider,
+        selector: CameraSelector,
+        useOemNight: Boolean,
+        generation: Int
+    ) {
+        if (generation != cameraGeneration || isDestroyed || isFinishing) return
+        try {
+            val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            val photo = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
+                .setFlashMode(ImageCapture.FLASH_MODE_OFF)
+                .build()
+            provider.unbindAll()
+            val bound = provider.bindToLifecycle(this, selector, preview, photo)
+            capture = photo
+            activeCamera = bound
+            nightUsingOem = nightMode && useOemNight
+            manual = try { ManualCamera(bound) } catch (_: Exception) { null }
+            if (manualFocus && !nightMode) {
+                if (manual?.setManualFocus(focusPercent / 100f) == false) {
+                    manualFocus = false
+                    focusControlButton.text = "◎ FOCO"
+                }
+            }
+            if (mode == Mode.PRO && !nightMode) applyManual()
+            if (nightMode && !nightUsingOem) {
+                // Small physical AE boost; vendor Night mode handles exposure internally.
+                val state = bound.cameraInfo.exposureState
+                if (state.isExposureCompensationSupported) {
+                    val range = state.exposureCompensationRange
+                    val index = 2.coerceIn(range.lower, range.upper)
+                    bound.cameraControl.setExposureCompensationIndex(index)
+                }
+                hintLabel.text = "NOITE • 3 QUADROS • MANTENHA FIRME"
+            } else if (nightUsingOem) {
+                hintLabel.text = "NOITE • PROCESSAMENTO DO FABRICANTE"
+            }
+            shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
+            updateFlash()
+        } catch (e: Exception) {
+            if (useOemNight) {
+                // A device may advertise the extension but still reject binding.
+                val normalSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
+                bindCamera(provider, normalSelector, false, generation)
+            } else {
+                capture = null
+                toast("Câmera indisponível: ${e.localizedMessage}")
+            }
+        }
     }
 
     private fun applyManual() {
@@ -720,54 +953,142 @@ class MainActivity : ComponentActivity() {
         } else captureNow(imageCapture)
     }
 
+    private data class CaptureRecipe(
+        val film: FilmPreset,
+        val fx: FilmFxSettings,
+        val halfFrame: Boolean,
+        val dateStamp: Boolean,
+        val capturedAt: Long
+    )
+
     private fun captureNow(imageCapture: ImageCapture) {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
-        saveLabel.text = "PROCESSANDO FILME…"
-        val preset: FilmPreset = FilmCatalog.presets[selectedPreset]
-        val fx = FilmFxSettings(
-            grainStrength = grainStrength,
-            burnChance = burnChance,
-            seed = kotlin.random.Random.nextInt()
+        saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
+        val capturedGrade = if (nightMode && !nightUsingOem) {
+            // Subtle low-light shadow boost after actual frame fusion.
+            photoGrade.copy(shadows = maxOf(photoGrade.shadows, .16f))
+        } else photoGrade
+        val recipe = CaptureRecipe(
+            FilmCatalog.presets[selectedPreset],
+            FilmFxSettings(
+                grainStrength = if (nightMode) grainStrength * .70f else grainStrength,
+                burnChance = burnChance,
+                seed = kotlin.random.Random.nextInt(),
+                grade = capturedGrade
+            ),
+            halfFrame, dateStamp, System.currentTimeMillis()
         )
-        val useHalfFrame = halfFrame
-        val useDateStamp = dateStamp
-        val capturedAt = System.currentTimeMillis()
-        val tempFile = File.createTempFile("vortex-", ".jpg", cacheDir)
         if (soundEnabled) shutterSound.play()
-        shutterButton.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction {
+        shutterButton.animate().scaleX(.88f).scaleY(.88f).setDuration(80).withEndAction {
             shutterButton.animate().scaleX(1f).scaleY(1f).setDuration(170).start()
         }.start()
+        if (nightMode && !nightUsingOem) {
+            captureNightSequence(imageCapture, recipe)
+        } else {
+            captureSingle(imageCapture, recipe)
+        }
+    }
+
+    private fun captureSingle(imageCapture: ImageCapture, recipe: CaptureRecipe) {
+        val temporary = try {
+            File.createTempFile("vortex-photo-", ".jpg", cacheDir)
+        } catch (e: Exception) {
+            handleCaptureError(e)
+            return
+        }
         imageCapture.takePicture(
-            ImageCapture.OutputFileOptions.Builder(tempFile).build(), io,
+            ImageCapture.OutputFileOptions.Builder(temporary).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     try {
-                        val source = FilmProcessor.readUpright(tempFile)
-                        val result = try { FilmProcessor.process(source, preset, fx) }
-                        finally { source.recycle() }
-                        try {
-                            val presented = FilmPresentation.render(
-                                result, useHalfFrame, useDateStamp, capturedAt
-                            )
-                            try {
-                                val photoUri = saveToGallery(presented)
-                                runOnUiThread { onPhotoSaved(photoUri) }
-                            } finally {
-                                if (presented !== result) presented.recycle()
-                            }
-                        } finally { result.recycle() }
+                        val source = FilmProcessor.readUpright(temporary)
+                        processAndSave(source, recipe)
                     } catch (e: Exception) {
-                        runOnUiThread { finishCapture("Falha ao salvar foto"); toast(e.localizedMessage ?: "Erro") }
-                    } finally { tempFile.delete() }
+                        handleCaptureError(e)
+                    } finally {
+                        temporary.delete()
+                    }
                 }
                 override fun onError(exception: ImageCaptureException) {
-                    tempFile.delete()
-                    runOnUiThread { finishCapture("Erro ao fotografar"); toast(exception.localizedMessage ?: "Erro") }
+                    temporary.delete()
+                    handleCaptureError(exception)
                 }
             }
         )
+    }
+
+    private fun captureNightSequence(imageCapture: ImageCapture, recipe: CaptureRecipe) {
+        val frames = mutableListOf<File>()
+        fun finishWithError(e: Exception) {
+            frames.forEach { it.delete() }
+            handleCaptureError(e)
+        }
+        fun nextFrame() {
+            val file = try {
+                File.createTempFile("vortex-night-", ".jpg", cacheDir)
+            } catch (e: Exception) {
+                finishWithError(e)
+                return
+            }
+            imageCapture.takePicture(
+                ImageCapture.OutputFileOptions.Builder(file).build(), io,
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                        frames.add(file)
+                        if (frames.size < 3) {
+                            runOnUiThread { saveLabel.text = "NOITE • QUADRO ${frames.size}/3" }
+                            nextFrame()
+                        } else {
+                            try {
+                                val merged = NightFrameFusion.merge(frames)
+                                processAndSave(merged, recipe)
+                            } catch (e: Exception) {
+                                handleCaptureError(e)
+                            } finally {
+                                frames.forEach { it.delete() }
+                            }
+                        }
+                    }
+                    override fun onError(exception: ImageCaptureException) {
+                        file.delete()
+                        finishWithError(exception)
+                    }
+                }
+            )
+        }
+        nextFrame()
+    }
+
+    private fun processAndSave(source: android.graphics.Bitmap, recipe: CaptureRecipe) {
+        try {
+            val filtered = FilmProcessor.process(source, recipe.film, recipe.fx)
+            try {
+                val presented = FilmPresentation.render(
+                    filtered, recipe.halfFrame, recipe.dateStamp, recipe.capturedAt
+                )
+                try {
+                    val uri = saveToGallery(presented)
+                    runOnUiThread { if (!isDestroyed) onPhotoSaved(uri) }
+                } finally {
+                    if (presented !== filtered) presented.recycle()
+                }
+            } finally {
+                filtered.recycle()
+            }
+        } finally {
+            source.recycle()
+        }
+    }
+
+    private fun handleCaptureError(error: Exception) {
+        runOnUiThread {
+            if (!isFinishing && !isDestroyed) {
+                finishCapture("Falha na captura • tente novamente")
+                toast(error.localizedMessage ?: "Erro ao fotografar")
+            }
+        }
     }
 
     private fun saveToGallery(image: android.graphics.Bitmap): Uri {

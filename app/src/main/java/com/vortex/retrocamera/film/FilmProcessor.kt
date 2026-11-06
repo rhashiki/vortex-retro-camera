@@ -18,7 +18,8 @@ import kotlin.math.pow
 data class FilmFxSettings(
     val grainStrength: Float = 1.6f, // 0..3
     val burnChance: Float = 0.16f,   // 0..1 (only analog film)
-    val seed: Int = System.nanoTime().toInt()
+    val seed: Int = System.nanoTime().toInt(),
+    val grade: PhotoGrade = PhotoGrade()
 )
 
 data class FilmArtifactPlan(
@@ -86,6 +87,8 @@ object FilmProcessor {
         val cy = (height - 1) / 2f
         val intensity = fx.grainStrength.coerceIn(0f, 3f)
         val leakWidth = plan.spread
+        val grade = fx.grade.normalized()
+        val graded = FloatArray(3)
         for (y in 0 until height) {
             val fy = if (cy > 0f) (y - cy) / cy else 0f
             val rowLeak = if (plan.burn) {
@@ -118,9 +121,17 @@ object FilmProcessor {
                     preset.grain * intensity * grainFalloff
                 val darkening = 1f - preset.vignette * falloff.pow(1.7f)
 
-                var r = channel(sourceR, preset.red, preset, grain, darkening)
-                var g = channel(sourceG, preset.green, preset, grain, darkening)
-                var b = channel(sourceB, preset.blue, preset, grain, darkening)
+                // Apply color grading before film-light leaks; the effect remains
+                // part of the photograph rather than a separate UI-only filter.
+                ColorGrader.apply(
+                    channel(sourceR, preset.red, preset, grain, darkening),
+                    channel(sourceG, preset.green, preset, grain, darkening),
+                    channel(sourceB, preset.blue, preset, grain, darkening),
+                    grade, graded
+                )
+                var r = graded[0]
+                var g = graded[1]
+                var b = graded[2]
 
                 if (plan.burn) {
                     val edge = if (plan.fromLeft) x.toFloat() / width
