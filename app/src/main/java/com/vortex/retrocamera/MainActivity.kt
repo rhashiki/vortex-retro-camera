@@ -326,8 +326,12 @@ class MainActivity : ComponentActivity() {
                 text = preset.name.replace("KODAK ", "K ").replace("FUJI ", "F ")
                 textSize = 10f
                 isAllCaps = false
-                setTextColor(if (active) bg else Color.LTGRAY)
-                setBackgroundColor(if (active) accent else 0xFF262932.toInt())
+                setTextColor(if (active) bg else 0xFFD1CBC5.toInt())
+                background = rounded(
+                    if (active) accent else 0xFF2B2D33.toInt(),
+                    11,
+                    if (active) 0xFFFFDEB9.toInt() else 0xFF4F4F59.toInt()
+                )
                 setOnClickListener { selectedPreset = index; updateFilm(); buildPresetChips() }
             }
             presetStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(49)).apply {
@@ -341,8 +345,11 @@ class MainActivity : ComponentActivity() {
         for (i in 0 until modeStrip.childCount) {
             val btn = modeStrip.getChildAt(i) as Button
             val selected = btn.tag == mode
-            btn.setTextColor(if (selected) accent else muted)
-            btn.alpha = if (selected) 1f else .7f
+            btn.setTextColor(if (selected) bg else muted)
+            btn.background = rounded(
+                if (selected) accent else 0xFF27272D.toInt(), 10,
+                if (selected) 0xFFF4D6AF.toInt() else 0xFF45434B.toInt()
+            )
         }
         proPanel.visibility = if (mode == Mode.PRO) View.VISIBLE else View.GONE
         hintLabel.text = when (mode) {
