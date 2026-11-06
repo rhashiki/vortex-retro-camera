@@ -1,6 +1,7 @@
 package com.vortex.retrocamera
 
 import android.Manifest
+import android.app.Dialog
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -17,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.view.Gravity
+import android.view.MotionEvent
 import android.util.Size
 import android.view.Surface
 import android.view.View
@@ -29,26 +31,33 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.vortex.retrocamera.camera.ManualCamera
+import com.vortex.retrocamera.audio.MechanicalShutter
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.FilmPreset
 import com.vortex.retrocamera.film.FilmProcessor
+import com.vortex.retrocamera.film.FilmFxSettings
 import com.vortex.retrocamera.film.FilmPresentation
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Vortex Retro Camera v0.1: native CameraX capture + offline film JPEG processing.
  * Pano/video are intentionally not active before a film-aware pipeline exists.
@@ -60,10 +69,16 @@ class MainActivity : ComponentActivity() {
     private val accent = Color.rgb(230, 199, 160)
     private val muted = Color.rgb(156, 156, 164)
     private val io = Executors.newSingleThreadExecutor()
+    private val shutterSound = MechanicalShutter()
     private val handler = Handler(Looper.getMainLooper())
     private var selectedPreset = 0
     private var halfFrame = false
     private var dateStamp = false
+    private var manualFocus = false
+    private var focusPercent = 0
+    private var grainStrength = 1.6f
+    private var burnChance = 0.16f
+    private var soundEnabled = true
     private var mode = Mode.FOTO
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
@@ -77,6 +92,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
     private lateinit var frameGuide: RetroViewfinderOverlay
+    private lateinit var focusMarker: View
+    private lateinit var viewfinderFrame: FrameLayout
+    private lateinit var focusControlButton: Button
     private lateinit var galleryThumb: ImageView
     private lateinit var exposureDisplay: TextView
     private lateinit var filmTagline: TextView
@@ -94,6 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = bg
         window.navigationBarColor = bg
         buildInterface()
@@ -108,6 +127,12 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(bg)
         }
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
 
         // Physical-camera-inspired matte graphite chassis.
         val topBar = LinearLayout(this).apply {
@@ -136,6 +161,7 @@ class MainActivity : ComponentActivity() {
             background = rounded(0xFF050506.toInt(), 20, 0xFF706C70.toInt())
             clipToOutline = true
         }
+        viewfinderFrame = viewFrame
         root.addView(viewFrame, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             setMargins(dp(10), 0, dp(10), dp(5))
         })
@@ -145,10 +171,27 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
         }
         viewFrame.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        previewView.setOnTouchListener { view, event ->
+            if (event.action == MotionEvent.ACTION_UP) {
+                view.performClick()
+                focusAt(event.x, event.y)
+            }
+            true
+        }
         previewTint = View(this).apply { isClickable = false }
         viewFrame.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
         frameGuide = RetroViewfinderOverlay(this).apply { isClickable = false }
         viewFrame.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
+        focusMarker = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0x00000000)
+                setStroke(dp(2), accent)
+            }
+            alpha = 0f
+            isClickable = false
+        }
+        viewFrame.addView(focusMarker, FrameLayout.LayoutParams(dp(68), dp(68)))
 
         val filmBadge = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -191,24 +234,26 @@ class MainActivity : ComponentActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(57)))
         buildPresetChips()
 
-        val settingsRow = LinearLayout(this).apply {
+        // Quiet, compact toolbar: detailed controls live in bottom sheets.
+        val quickRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(12), 0, dp(12), dp(3))
+            setPadding(dp(10), dp(1), dp(10), dp(5))
         }
-        settingsRow.addView(smallButton("HALF FRAME OFF") {
-            halfFrame = !halfFrame
-            frameGuide.halfFrame = halfFrame
-            it.text = if (halfFrame) "HALF FRAME ON" else "HALF FRAME OFF"
-        }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        settingsRow.addView(smallButton("DATA OFF") {
-            dateStamp = !dateStamp
-            it.text = if (dateStamp) "DATA ON" else "DATA OFF"
-        }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        settingsRow.addView(smallButton("◷ 0s") {
-            timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
-            it.text = "◷ " + timerSeconds + "s"
-        }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        root.addView(settingsRow)
+        focusControlButton = smallButton("◎ FOCO  AF") { showFocusSheet() }.apply {
+            contentDescription = "Foco automático ou manual"
+        }
+        quickRow.addView(focusControlButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+            setMargins(dp(3), 0, dp(3), 0)
+        })
+        quickRow.addView(smallButton("◉  TEXTURA") { showFilmSheet() },
+            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(3), 0, dp(3), 0)
+            })
+        quickRow.addView(smallButton("⚙  AJUSTES") { showOptionsSheet() },
+            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                setMargins(dp(3), 0, dp(3), 0)
+            })
+        root.addView(quickRow)
 
         modeStrip = LinearLayout(this).apply {
             gravity = Gravity.CENTER
@@ -249,6 +294,8 @@ class MainActivity : ComponentActivity() {
         }
         val galleryButton = FrameLayout(this).apply {
             background = rounded(0xFF333237.toInt(), 13, accent)
+            clipChildren = true
+            clipToOutline = true
             isClickable = true
             isFocusable = true
             contentDescription = "Abrir as fotos tiradas no Vortex Retro Camera"
@@ -258,9 +305,13 @@ class MainActivity : ComponentActivity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             contentDescription = "Galeria de fotografias"
             setImageResource(android.R.drawable.ic_menu_gallery)
-            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setBackgroundColor(0xFF333237.toInt())
+            background = rounded(0xFF38363A.toInt(), 10)
+            clipToOutline = true
         }
-        galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1))
+        galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1).apply {
+            setMargins(dp(3), dp(3), dp(3), dp(3))
+        })
         actionRow.addView(galleryButton, LinearLayout.LayoutParams(dp(59), dp(59)))
 
         val center = FrameLayout(this)
@@ -318,6 +369,197 @@ class MainActivity : ComponentActivity() {
         setOnClickListener { action(this) }
     }
 
+    private fun showSheet(title: String, build: (LinearLayout) -> Unit) {
+        val dialog = Dialog(this)
+        val surface = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(14), dp(20), dp(24))
+            background = rounded(0xFF202126.toInt(), 24, 0xFF4D4C51.toInt())
+        }
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(text(title, 17f, Color.WHITE, Typeface.BOLD).apply {
+            letterSpacing = 0.04f
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        heading.addView(smallButton("FECHAR") { dialog.dismiss() },
+            LinearLayout.LayoutParams(dp(86), dp(44))
+        )
+        surface.addView(heading)
+        surface.addView(text("RETRO CAMERA BY VORTEX", 9f, accent).apply {
+            letterSpacing = 0.16f
+            setPadding(0, dp(3), 0, dp(15))
+        })
+        build(surface)
+        dialog.setContentView(surface)
+        dialog.window?.apply {
+            setBackgroundDrawableResource(android.R.color.transparent)
+            setDimAmount(0.48f)
+            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setGravity(Gravity.BOTTOM)
+        }
+        dialog.show()
+        dialog.window?.setLayout(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+    }
+
+    private fun rowAction(
+        parent: LinearLayout,
+        label: String,
+        description: String,
+        action: (Button) -> Unit
+    ): Button {
+        val row = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        info.addView(text(label, 13f, Color.WHITE, Typeface.BOLD))
+        info.addView(text(description, 10f, muted))
+        row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        val button = smallButton("ALTERAR", action)
+        row.addView(button, LinearLayout.LayoutParams(dp(92), dp(43)))
+        parent.addView(row)
+        return button
+    }
+
+    private fun showOptionsSheet() {
+        showSheet("Ajustes da câmera") { content ->
+            rowAction(content, "Half Frame", "Enquadramento vertical 3:4") { button ->
+                halfFrame = !halfFrame
+                frameGuide.halfFrame = halfFrame
+                button.text = if (halfFrame) "ATIVADO" else "DESL."
+            }.text = if (halfFrame) "ATIVADO" else "DESL."
+
+            rowAction(content, "Data retrô", "Carimbo âmbar com a data real") { button ->
+                dateStamp = !dateStamp
+                button.text = if (dateStamp) "ATIVADO" else "DESL."
+            }.text = if (dateStamp) "ATIVADO" else "DESL."
+
+            rowAction(content, "Temporizador", "0, 3 ou 10 segundos") { button ->
+                timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
+                button.text = "${timerSeconds}s"
+            }.text = "${timerSeconds}s"
+
+            rowAction(content, "Som mecânico", "Disparo + avanço do filme sintetizados") { button ->
+                soundEnabled = !soundEnabled
+                button.text = if (soundEnabled) "LIGADO" else "MUDO"
+            }.text = if (soundEnabled) "LIGADO" else "MUDO"
+        }
+    }
+
+    private fun showFilmSheet() {
+        showSheet("Textura da película") { content ->
+            val grainLabel = text("GRANULAÇÃO • ${(grainStrength * 100).toInt()}%", 12f, accent)
+            content.addView(grainLabel)
+            content.addView(SeekBar(this).apply {
+                max = 300
+                progress = (grainStrength * 100).toInt()
+                setOnSeekBarChangeListener(simpleSeek { value ->
+                    grainStrength = value / 100f
+                    grainLabel.text = "GRANULAÇÃO • ${value}%"
+                })
+            })
+            content.addView(text("De película suave até grão mais pronunciado.", 10f, muted))
+            val burnLabel = text("QUEIMA DE FILME • ${(burnChance * 100).toInt()}% das fotos", 12f, accent).apply {
+                setPadding(0, dp(20), 0, 0)
+            }
+            content.addView(burnLabel)
+            content.addView(SeekBar(this).apply {
+                max = 50
+                progress = (burnChance * 100).toInt()
+                setOnSeekBarChangeListener(simpleSeek { value ->
+                    burnChance = value / 100f
+                    burnLabel.text = "QUEIMA DE FILME • ${value}% das fotos"
+                })
+            })
+            content.addView(text("Vazamentos de luz nas bordas sorteados por foto. Em sensores CCD digitais, este efeito não é aplicado.", 10f, muted))
+        }
+    }
+
+    private fun showFocusSheet() {
+        showSheet("Foco da lente") { content ->
+            val status = text(
+                if (manualFocus) "MF • FOCO MANUAL" else "AF • TOQUE NO VISOR PARA FOCAR",
+                12f, accent
+            )
+            content.addView(status)
+            content.addView(text(
+                "AF usa o ponto tocado e medição de luz. MF usa a distância óptica da lente, quando o sensor oferece este controle.",
+                10f, muted
+            ).apply { setPadding(0, dp(4), 0, dp(14)) })
+            val slider = SeekBar(this).apply {
+                max = 100
+                progress = focusPercent
+                isEnabled = manualFocus && (manual?.supportsManualFocus == true)
+                alpha = if (isEnabled) 1f else 0.35f
+            }
+            val distanceLabel = text(
+                "∞ INFINITO     —     PERTO / MACRO",
+                10f, muted
+            )
+            rowAction(content, "Autofoco", "Foco contínuo + toque na cena") { _ ->
+                manualFocus = false
+                manual?.setAutoFocus()
+                focusControlButton.text = "◎ FOCO  AF"
+                slider.isEnabled = false
+                slider.alpha = 0.35f
+                status.text = "AF • TOQUE NO VISOR PARA FOCAR"
+            }.text = "AF"
+
+            rowAction(content, "Foco manual", "Ajuste de dioptrias por deslizamento") { _ ->
+                val controller = manual
+                if (controller?.supportsManualFocus != true) {
+                    toast("Esta lente não permite foco manual por hardware.")
+                } else {
+                    manualFocus = true
+                    controller.setManualFocus(focusPercent / 100f)
+                    focusControlButton.text = "◎ FOCO  MF"
+                    slider.isEnabled = true
+                    slider.alpha = 1f
+                    status.text = "MF • DESLIZE PARA AJUSTAR"
+                }
+            }.text = "MF"
+
+            content.addView(slider)
+            content.addView(distanceLabel)
+            slider.setOnSeekBarChangeListener(simpleSeek { value ->
+                focusPercent = value
+                if (manualFocus) manual?.setManualFocus(value / 100f)
+            })
+        }
+    }
+
+    private fun focusAt(x: Float, y: Float) {
+        if (manualFocus) {
+            toast("Foco manual ativo. Ajusta pelo botão FOCO.")
+            return
+        }
+        val camera = activeCamera ?: return
+        val markerLayout = focusMarker.layoutParams as FrameLayout.LayoutParams
+        markerLayout.leftMargin = (x.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.width - dp(68)).coerceAtLeast(0))
+        markerLayout.topMargin = (y.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.height - dp(68)).coerceAtLeast(0))
+        focusMarker.layoutParams = markerLayout
+        focusMarker.animate().cancel()
+        focusMarker.scaleX = 1.28f
+        focusMarker.scaleY = 1.28f
+        focusMarker.alpha = 1f
+        focusMarker.animate().scaleX(1f).scaleY(1f).setDuration(180).start()
+        val point = previewView.meteringPointFactory.createPoint(x, y, 0.15f)
+        val action = FocusMeteringAction.Builder(point)
+            .setAutoCancelDuration(4, TimeUnit.SECONDS)
+            .build()
+        val future = camera.cameraControl.startFocusAndMetering(action)
+        future.addListener({
+            val success = try { future.get().isFocusSuccessful } catch (_: Exception) { false }
+            if (!isFinishing && !isDestroyed) {
+                hintLabel.text = if (success) "FOCO TRAVADO  ✓" else "AF: AJUSTE EM ANDAMENTO"
+                focusMarker.animate().alpha(0f).setStartDelay(550).setDuration(450).start()
+            }
+        }, ContextCompat.getMainExecutor(this))
+    }
+
     private fun buildPresetChips() {
         presetStrip.removeAllViews()
         FilmCatalog.presets.forEachIndexed { index, preset ->
@@ -359,7 +601,9 @@ class MainActivity : ComponentActivity() {
             Mode.VIDEO -> "VÍDEO RETRÔ · em desenvolvimento (M5)"
         }
         shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
-        if (mode == Mode.PRO) applyManual() else manual?.reset()
+        if (mode == Mode.PRO) applyManual() else {
+            if (manualFocus) manual?.clearExposure() else manual?.reset()
+        }
     }
 
     private fun buildProPanel() {
@@ -442,6 +686,12 @@ class MainActivity : ComponentActivity() {
                 capture = photo
                 activeCamera = bound
                 manual = ManualCamera(bound)
+                if (manualFocus) {
+                    if (manual?.setManualFocus(focusPercent / 100f) == false) {
+                        manualFocus = false
+                        focusControlButton.text = "◎ FOCO  AF"
+                    }
+                }
                 if (mode == Mode.PRO) applyManual()
             } catch (e: Exception) {
                 toast("Não foi possível iniciar a câmera: ${e.localizedMessage}")
@@ -476,17 +726,26 @@ class MainActivity : ComponentActivity() {
         shutterButton.isEnabled = false
         saveLabel.text = "PROCESSANDO FILME…"
         val preset: FilmPreset = FilmCatalog.presets[selectedPreset]
+        val fx = FilmFxSettings(
+            grainStrength = grainStrength,
+            burnChance = burnChance,
+            seed = kotlin.random.Random.nextInt()
+        )
         val useHalfFrame = halfFrame
         val useDateStamp = dateStamp
         val capturedAt = System.currentTimeMillis()
         val tempFile = File.createTempFile("vortex-", ".jpg", cacheDir)
+        if (soundEnabled) shutterSound.play()
+        shutterButton.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction {
+            shutterButton.animate().scaleX(1f).scaleY(1f).setDuration(170).start()
+        }.start()
         imageCapture.takePicture(
             ImageCapture.OutputFileOptions.Builder(tempFile).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     try {
                         val source = FilmProcessor.readUpright(tempFile)
-                        val result = try { FilmProcessor.process(source, preset) }
+                        val result = try { FilmProcessor.process(source, preset, fx) }
                         finally { source.recycle() }
                         try {
                             val presented = FilmPresentation.render(
@@ -555,7 +814,13 @@ class MainActivity : ComponentActivity() {
                 contentResolver.loadThumbnail(target, Size(dp(120), dp(120)), null)
             } catch (_: Exception) { null }
             if (bitmap != null) runOnUiThread {
-                if (!isFinishing && !isDestroyed) galleryThumb.setImageBitmap(bitmap)
+                if (!isFinishing && !isDestroyed) {
+                    galleryThumb.setImageBitmap(bitmap)
+                    galleryThumb.animate().scaleX(0.96f).scaleY(0.96f)
+                        .setDuration(90).withEndAction {
+                            galleryThumb.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+                        }.start()
+                }
             }
         }
     }
@@ -583,6 +848,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        shutterSound.release()
         io.shutdown()
         super.onDestroy()
     }

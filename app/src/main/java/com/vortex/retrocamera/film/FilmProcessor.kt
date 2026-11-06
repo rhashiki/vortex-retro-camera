@@ -5,12 +5,45 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
+import java.util.Random
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
 
-/** Offline image processor. This first milestone applies a CPU recipe to saved JPEG files.
- * Preview has only an indicative tint; true GPU parity is a subsequent milestone.
+/**
+ * Independent controls: material texture and rare, imperfect film edge exposures.
+ * A single capture seed is preserved through processing for reproducible renders.
+ */
+data class FilmFxSettings(
+    val grainStrength: Float = 1.6f, // 0..3
+    val burnChance: Float = 0.16f,   // 0..1 (only analog film)
+    val seed: Int = System.nanoTime().toInt()
+)
+
+data class FilmArtifactPlan(
+    val burn: Boolean,
+    val fromLeft: Boolean,
+    val spread: Float,
+    val intensity: Float
+)
+
+object FilmArtifactPlanner {
+    fun plan(preset: FilmPreset, fx: FilmFxSettings): FilmArtifactPlan {
+        val rng = Random(fx.seed.toLong())
+        val burn = !preset.isDigitalCcd && rng.nextFloat() < fx.burnChance.coerceIn(0f, 1f)
+        return FilmArtifactPlan(
+            burn = burn,
+            fromLeft = rng.nextBoolean(),
+            spread = 0.19f + rng.nextFloat() * 0.28f,
+            intensity = 0.55f + rng.nextFloat() * 0.43f
+        )
+    }
+}
+
+/**
+ * CPU film emulation for exported photographs; the viewport applies only a GPU
+ * tonal approximation. Physically calibrated film chemistry remains future work.
  */
 object FilmProcessor {
     private const val MAX_LONG_EDGE = 4096
@@ -41,31 +74,76 @@ object FilmProcessor {
             .also { if (it !== decoded) decoded.recycle() }
     }
 
-    fun process(input: Bitmap, preset: FilmPreset): Bitmap {
+    fun process(input: Bitmap, preset: FilmPreset, fx: FilmFxSettings = FilmFxSettings()): Bitmap {
         val width = input.width
         val height = input.height
         val pixels = IntArray(width * height)
         input.getPixels(pixels, 0, width, 0, 0, width, height)
-        // Deterministic noise means the same preset/photo produces the same output.
-        var seed = 0x4567AC19
+
+        val plan = FilmArtifactPlanner.plan(preset, fx)
+        var noiseSeed = fx.seed xor 0x4567AC19
         val cx = (width - 1) / 2f
         val cy = (height - 1) / 2f
+        val intensity = fx.grainStrength.coerceIn(0f, 3f)
+        val leakWidth = plan.spread
         for (y in 0 until height) {
             val fy = if (cy > 0f) (y - cy) / cy else 0f
+            val rowLeak = if (plan.burn) {
+                // Uneven exposed edge: upper/lower variations instead of a sterile rectangle.
+                val irregular = 1f - abs(fy) * 0.27f
+                irregular * (1f + 0.10f * kotlin.math.sin(y / 83f))
+            } else 0f
             for (x in 0 until width) {
                 val i = y * width + x
                 val p = pixels[i]
-                val fx = if (cx > 0f) (x - cx) / cx else 0f
-                val falloff = ((fx * fx + fy * fy) * 0.5f).coerceIn(0f, 1f)
-                seed = seed xor (seed shl 13)
-                seed = seed xor (seed ushr 17)
-                seed = seed xor (seed shl 5)
-                val noise = ((seed and 255) / 255f - 0.5f) * preset.grain
+                val fxn = if (cx > 0f) (x - cx) / cx else 0f
+                val falloff = ((fxn * fxn + fy * fy) * 0.5f).coerceIn(0f, 1f)
+
+                val sourceR = (p shr 16 and 255) / 255f
+                val sourceG = (p shr 8 and 255) / 255f
+                val sourceB = (p and 255) / 255f
+                val luminance = (sourceR * .2126f + sourceG * .7152f + sourceB * .0722f)
+                    .coerceIn(0f, 1f)
+
+                noiseSeed = noiseSeed xor (noiseSeed shl 13)
+                noiseSeed = noiseSeed xor (noiseSeed ushr 17)
+                noiseSeed = noiseSeed xor (noiseSeed shl 5)
+                val noise1 = ((noiseSeed and 0xffff) / 65535f - .5f)
+                noiseSeed = noiseSeed xor (noiseSeed shl 13)
+                noiseSeed = noiseSeed xor (noiseSeed ushr 17)
+                noiseSeed = noiseSeed xor (noiseSeed shl 5)
+                val noise2 = ((noiseSeed and 0xffff) / 65535f - .5f)
+                val grainFalloff = 0.42f + 1.13f * (1f - luminance) * (0.4f + luminance)
+                val grain = (noise1 * 0.76f + noise2 * 0.24f) *
+                    preset.grain * intensity * grainFalloff
                 val darkening = 1f - preset.vignette * falloff.pow(1.7f)
-                val r = channel(p shr 16 and 255, preset.red, preset, noise, darkening)
-                val g = channel(p shr 8 and 255, preset.green, preset, noise, darkening)
-                val b = channel(p and 255, preset.blue, preset, noise, darkening)
-                pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+
+                var r = channel(sourceR, preset.red, preset, grain, darkening)
+                var g = channel(sourceG, preset.green, preset, grain, darkening)
+                var b = channel(sourceB, preset.blue, preset, grain, darkening)
+
+                if (plan.burn) {
+                    val edge = if (plan.fromLeft) x.toFloat() / width
+                               else (width - x).toFloat() / width
+                    if (edge < leakWidth) {
+                        val position = (1f - edge / leakWidth).coerceIn(0f, 1f)
+                        val strength = position * position * rowLeak * plan.intensity
+                        // Warm orange/red edge exposure and a narrow pale-yellow core.
+                        val hot = (strength * 1.15f).coerceIn(0f, 1f)
+                        r = r + (1f - r) * hot
+                        g = g + (0.72f - g) * (strength * 0.65f).coerceIn(0f, 1f)
+                        b = b * (1f - strength * 0.88f).coerceAtLeast(0f)
+                        if (edge < leakWidth * 0.20f) {
+                            val flare = ((1f - edge / (leakWidth * 0.20f)) * .70f).coerceIn(0f, .70f)
+                            r = r + (1f - r) * flare
+                            g = g + (1f - g) * flare * .75f
+                        }
+                    }
+                }
+                val red = (r.coerceIn(0f, 1f) * 255f + .5f).toInt()
+                val green = (g.coerceIn(0f, 1f) * 255f + .5f).toInt()
+                val blue = (b.coerceIn(0f, 1f) * 255f + .5f).toInt()
+                pixels[i] = (0xFF shl 24) or (red shl 16) or (green shl 8) or blue
             }
         }
         return Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also {
@@ -73,16 +151,19 @@ object FilmProcessor {
         }
     }
 
-    private fun channel(byte: Int, colorFactor: Float, film: FilmPreset, noise: Float, falloff: Float): Int {
-        val original = byte / 255f
-        var v = ((original - 0.5f) * film.contrast + 0.5f + film.lift) * colorFactor
-        // Approximate shoulder / toe response, gentler than hard clipping.
+    private fun channel(
+        source: Float,
+        colorFactor: Float,
+        film: FilmPreset,
+        grain: Float,
+        falloff: Float
+    ): Float {
+        var v = ((source - .5f) * film.contrast + .5f + film.lift) * colorFactor
         v = when {
             v < 0f -> 0f
             v > 1f -> 1f
-            else -> v * v * (3f - 2f * v) * 0.18f + v * 0.82f
+            else -> v * v * (3f - 2f * v) * .18f + v * .82f
         }
-        v = (v + noise) * falloff
-        return (min(1f, max(0f, v)) * 255f + 0.5f).toInt()
+        return (v + grain) * falloff
     }
 }
