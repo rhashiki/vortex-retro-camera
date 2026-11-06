@@ -24,6 +24,9 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import java.util.concurrent.Executors
 import kotlin.math.max
 
@@ -44,6 +47,7 @@ class GalleryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = 0xFF121315.toInt()
         window.navigationBarColor = 0xFF121315.toInt()
         val root = LinearLayout(this).apply {
@@ -51,6 +55,12 @@ class GalleryActivity : ComponentActivity() {
             setBackgroundColor(0xFF121315.toInt())
         }
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
         val head = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(14), dp(18), dp(14), dp(14))
@@ -64,6 +74,7 @@ class GalleryActivity : ComponentActivity() {
         val nameBlock = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         nameBlock.addView(TextView(this).apply {
             text = "REVELAÇÕES"
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             textSize = 18f
             letterSpacing = 0.12f
@@ -83,7 +94,7 @@ class GalleryActivity : ComponentActivity() {
             setPadding(dp(5), dp(5), dp(5), dp(5))
             clipToPadding = false
             stretchMode = GridView.STRETCH_COLUMN_WIDTH
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(0xFF141417.toInt())
         }
         galleryAdapter = object : BaseAdapter() {
             override fun getCount(): Int = images.size
