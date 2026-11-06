@@ -492,9 +492,12 @@ class MainActivity : ComponentActivity() {
                             val presented = FilmPresentation.render(
                                 result, useHalfFrame, useDateStamp, capturedAt
                             )
-                            val photoUri = saveToGallery(presented)
-                            runOnUiThread { onPhotoSaved(photoUri) }
-                            finally { if (presented !== result) presented.recycle() }
+                            try {
+                                val photoUri = saveToGallery(presented)
+                                runOnUiThread { onPhotoSaved(photoUri) }
+                            } finally {
+                                if (presented !== result) presented.recycle()
+                            }
                         } finally { result.recycle() }
                     } catch (e: Exception) {
                         runOnUiThread { finishCapture("Falha ao salvar foto"); toast(e.localizedMessage ?: "Erro") }
