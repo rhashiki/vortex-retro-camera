@@ -29,6 +29,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
@@ -42,16 +43,20 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
+import androidx.camera.extensions.ExtensionMode
+import androidx.camera.extensions.ExtensionsManager
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.vortex.retrocamera.camera.ManualCamera
+import com.vortex.retrocamera.camera.NightFrameFusion
 import com.vortex.retrocamera.audio.MechanicalShutter
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.FilmPreset
 import com.vortex.retrocamera.film.FilmProcessor
 import com.vortex.retrocamera.film.FilmFxSettings
 import com.vortex.retrocamera.film.FilmPresentation
+import com.vortex.retrocamera.film.PhotoGrade
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -64,6 +69,7 @@ import java.util.concurrent.TimeUnit
  */
 class MainActivity : ComponentActivity() {
     private enum class Mode { FOTO, PANORAMA, PRO, VIDEO }
+    private enum class Flash { OFF, AUTO, ON }
 
     private val bg = Color.rgb(11, 13, 18)
     private val accent = Color.rgb(230, 199, 160)
@@ -79,6 +85,11 @@ class MainActivity : ComponentActivity() {
     private var grainStrength = 1.6f
     private var burnChance = 0.16f
     private var soundEnabled = true
+    private var photoGrade = PhotoGrade()
+    private var flashSetting = Flash.OFF
+    private var nightMode = false
+    private var nightUsingOem = false
+    private var cameraGeneration = 0
     private var mode = Mode.FOTO
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
@@ -95,6 +106,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var focusMarker: View
     private lateinit var viewfinderFrame: FrameLayout
     private lateinit var focusControlButton: Button
+    private lateinit var nightButton: Button
+    private lateinit var flashButton: Button
     private lateinit var galleryThumb: ImageView
     private lateinit var exposureDisplay: TextView
     private lateinit var filmTagline: TextView
@@ -149,6 +162,12 @@ class MainActivity : ComponentActivity() {
             typeface = Typeface.MONOSPACE
         }
         brandRow.addView(exposureDisplay)
+        brandRow.addView(smallButton("⚙") { showOptionsSheet() }.apply {
+            contentDescription = "Configurações e textura da câmera"
+            textSize = 15f
+        }, LinearLayout.LayoutParams(dp(48), dp(43)).apply {
+            setMargins(dp(10), 0, 0, 0)
+        })
         topBar.addView(brandRow)
         topBar.addView(text("RETRO CAMERA    •    FILM SERIES 2000", 9f, muted).apply {
             letterSpacing = 0.12f
@@ -234,25 +253,28 @@ class MainActivity : ComponentActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, dp(57)))
         buildPresetChips()
 
-        // Quiet, compact toolbar: detailed controls live in bottom sheets.
+        // Capture-first toolbar: focus, tonal controls, actual night, real flash.
         val quickRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            setPadding(dp(10), dp(1), dp(10), dp(5))
+            setPadding(dp(10), dp(2), dp(10), dp(4))
         }
-        focusControlButton = smallButton("◎ FOCO  AF") { showFocusSheet() }.apply {
-            contentDescription = "Foco automático ou manual"
-        }
-        quickRow.addView(focusControlButton, LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-            setMargins(dp(3), 0, dp(3), 0)
+        focusControlButton = smallButton("◎ FOCO") { showFocusSheet() }
+        quickRow.addView(focusControlButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
         })
-        quickRow.addView(smallButton("◉  TEXTURA") { showFilmSheet() },
-            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(3), 0, dp(3), 0)
+        quickRow.addView(smallButton("◐ LUZ") { showGradeSheet() },
+            LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+                setMargins(dp(2), 0, dp(2), 0)
             })
-        quickRow.addView(smallButton("⚙  AJUSTES") { showOptionsSheet() },
-            LinearLayout.LayoutParams(0, dp(44), 1f).apply {
-                setMargins(dp(3), 0, dp(3), 0)
-            })
+        )
+        nightButton = smallButton("☾ NOITE") { toggleNight() }
+        quickRow.addView(nightButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
+        flashButton = smallButton("⚡ OFF") { cycleFlash() }
+        quickRow.addView(flashButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
+            setMargins(dp(2), 0, dp(2), 0)
+        })
         root.addView(quickRow)
 
         modeStrip = LinearLayout(this).apply {
@@ -388,7 +410,19 @@ class MainActivity : ComponentActivity() {
             letterSpacing = 0.16f
             setPadding(0, dp(3), 0, dp(15))
         })
-        build(surface)
+        val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        build(details)
+        val scroll = object : ScrollView(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                val limit = (resources.displayMetrics.heightPixels * 0.63f).toInt()
+                super.onMeasure(
+                    widthMeasureSpec,
+                    View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST)
+                )
+            }
+        }
+        scroll.addView(details)
+        surface.addView(scroll)
         dialog.setContentView(surface)
         dialog.window?.apply {
             setBackgroundDrawableResource(android.R.color.transparent)
@@ -424,8 +458,123 @@ class MainActivity : ComponentActivity() {
         return button
     }
 
+    private fun cycleFlash() {
+        if (nightMode) {
+            toast("No modo noturno, o flash fica desligado. Desativa a Noite para usar flash.")
+            return
+        }
+        val available = activeCamera?.cameraInfo?.hasFlashUnit() ?: false
+        if (!available) {
+            toast("A lente selecionada não possui flash físico.")
+            flashSetting = Flash.OFF
+        } else {
+            flashSetting = when (flashSetting) {
+                Flash.OFF -> Flash.AUTO
+                Flash.AUTO -> Flash.ON
+                Flash.ON -> Flash.OFF
+            }
+        }
+        updateFlash()
+    }
+
+    private fun updateFlash() {
+        val available = activeCamera?.cameraInfo?.hasFlashUnit() ?: false
+        val setting = if (nightMode || !available) Flash.OFF else flashSetting
+        capture?.flashMode = when (setting) {
+            Flash.OFF -> ImageCapture.FLASH_MODE_OFF
+            Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
+            Flash.ON -> ImageCapture.FLASH_MODE_ON
+        }
+        flashButton.text = when {
+            nightMode -> "⚡ NOITE"
+            !available -> "⚡ N/A"
+            setting == Flash.AUTO -> "⚡ AUTO"
+            setting == Flash.ON -> "⚡ ON"
+            else -> "⚡ OFF"
+        }
+    }
+
+    private fun toggleNight() {
+        if (saving) return toast("Aguarda a captura atual terminar.")
+        nightMode = !nightMode
+        if (nightMode && mode == Mode.PRO) {
+            // OEM Night extensions reject manual Camera2 exposure sessions.
+            setMode(Mode.FOTO)
+        }
+        nightButton.text = if (nightMode) "☾ LIGADO" else "☾ NOITE"
+        if (nightMode) {
+            hintLabel.text = "NOITE: mantenha o celular parado durante a captura"
+            toast("Modo noturno: captura com fusão de imagens. Segura o celular firme.")
+        }
+        startCamera()
+    }
+
+    private fun gradeSlider(
+        parent: LinearLayout,
+        label: String,
+        value: Float,
+        onChange: (Float) -> Unit
+    ) {
+        val title = text("$label  ${(value * 100).toInt().let { if (it > 0) "+$it" else "$it" }}",
+            12f, accent, Typeface.BOLD).apply {
+            setPadding(0, dp(7), 0, 0)
+        }
+        parent.addView(title)
+        parent.addView(SeekBar(this).apply {
+            max = 200
+            progress = ((value.coerceIn(-1f, 1f) + 1f) * 100).toInt()
+            setOnSeekBarChangeListener(simpleSeek { position ->
+                val current = (position - 100) / 100f
+                onChange(current)
+                val number = position - 100
+                title.text = "$label  " + (if (number > 0) "+$number" else "$number")
+                updateFilm()
+            })
+        })
+    }
+
+    private fun showGradeSheet() {
+        showSheet("Laboratório de luz") { content ->
+            content.addView(text(
+                "Ajustes aplicados à fotografia final, preservando a identidade do filme escolhido.",
+                10f, muted
+            ).apply { setPadding(0, 0, 0, dp(7)) })
+            gradeSlider(content, "BRILHO", photoGrade.brightness) {
+                photoGrade = photoGrade.copy(brightness = it)
+            }
+            gradeSlider(content, "CONTRASTE", photoGrade.contrast) {
+                photoGrade = photoGrade.copy(contrast = it)
+            }
+            gradeSlider(content, "SOMBRAS", photoGrade.shadows) {
+                photoGrade = photoGrade.copy(shadows = it)
+            }
+            gradeSlider(content, "REALCES", photoGrade.highlights) {
+                photoGrade = photoGrade.copy(highlights = it)
+            }
+            gradeSlider(content, "SATURAÇÃO", photoGrade.saturation) {
+                photoGrade = photoGrade.copy(saturation = it)
+            }
+            gradeSlider(content, "TEMPERATURA", photoGrade.warmth) {
+                photoGrade = photoGrade.copy(warmth = it)
+            }
+            content.addView(smallButton("RESTAURAR PADRÕES") {
+                photoGrade = PhotoGrade()
+                updateFilm()
+                toast("Ajustes zerados. Reabre o painel para atualizar os controles.")
+            }, LinearLayout.LayoutParams(-1, dp(48)))
+            content.addView(text(
+                "A prévia mostra cor/contraste aproximados; sombras e realces completos são processados ao fotografar.",
+                9f, muted
+            ))
+        }
+    }
+
     private fun showOptionsSheet() {
         showSheet("Ajustes da câmera") { content ->
+            rowAction(content, "Textura da película", "Granulação e queima de filme") {
+                showFilmSheet()
+            }.text = "ABRIR"
+
             rowAction(content, "Half Frame", "Enquadramento vertical 3:4") { button ->
                 halfFrame = !halfFrame
                 frameGuide.halfFrame = halfFrame
