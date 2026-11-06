@@ -1,6 +1,7 @@
 package com.vortex.retrocamera
 
 import android.Manifest
+import android.app.Dialog
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -17,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.view.Gravity
+import android.view.MotionEvent
 import android.util.Size
 import android.view.Surface
 import android.view.View
@@ -29,26 +31,33 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.vortex.retrocamera.camera.ManualCamera
+import com.vortex.retrocamera.audio.MechanicalShutter
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.FilmPreset
 import com.vortex.retrocamera.film.FilmProcessor
+import com.vortex.retrocamera.film.FilmFxSettings
 import com.vortex.retrocamera.film.FilmPresentation
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /** Vortex Retro Camera v0.1: native CameraX capture + offline film JPEG processing.
  * Pano/video are intentionally not active before a film-aware pipeline exists.
@@ -60,10 +69,16 @@ class MainActivity : ComponentActivity() {
     private val accent = Color.rgb(230, 199, 160)
     private val muted = Color.rgb(156, 156, 164)
     private val io = Executors.newSingleThreadExecutor()
+    private val shutterSound = MechanicalShutter()
     private val handler = Handler(Looper.getMainLooper())
     private var selectedPreset = 0
     private var halfFrame = false
     private var dateStamp = false
+    private var manualFocus = false
+    private var focusPercent = 0
+    private var grainStrength = 1.6f
+    private var burnChance = 0.16f
+    private var soundEnabled = true
     private var mode = Mode.FOTO
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
@@ -77,6 +92,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
     private lateinit var frameGuide: RetroViewfinderOverlay
+    private lateinit var focusMarker: View
+    private lateinit var viewfinderFrame: FrameLayout
+    private lateinit var focusControlButton: Button
     private lateinit var galleryThumb: ImageView
     private lateinit var exposureDisplay: TextView
     private lateinit var filmTagline: TextView
@@ -94,6 +112,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = bg
         window.navigationBarColor = bg
         buildInterface()
@@ -108,6 +127,12 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(bg)
         }
         setContentView(root)
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(0, bars.top, 0, bars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
 
         // Physical-camera-inspired matte graphite chassis.
         val topBar = LinearLayout(this).apply {
@@ -136,6 +161,7 @@ class MainActivity : ComponentActivity() {
             background = rounded(0xFF050506.toInt(), 20, 0xFF706C70.toInt())
             clipToOutline = true
         }
+        viewfinderFrame = viewFrame
         root.addView(viewFrame, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             setMargins(dp(10), 0, dp(10), dp(5))
         })
@@ -145,10 +171,27 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(Color.BLACK)
         }
         viewFrame.addView(previewView, FrameLayout.LayoutParams(-1, -1))
+        previewView.setOnTouchListener { view, event ->
+            if (event.action == MotionEvent.ACTION_UP) {
+                view.performClick()
+                focusAt(event.x, event.y)
+            }
+            true
+        }
         previewTint = View(this).apply { isClickable = false }
         viewFrame.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
         frameGuide = RetroViewfinderOverlay(this).apply { isClickable = false }
         viewFrame.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
+        focusMarker = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0x00000000)
+                setStroke(dp(2), accent)
+            }
+            alpha = 0f
+            isClickable = false
+        }
+        viewFrame.addView(focusMarker, FrameLayout.LayoutParams(dp(68), dp(68)))
 
         val filmBadge = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -249,6 +292,8 @@ class MainActivity : ComponentActivity() {
         }
         val galleryButton = FrameLayout(this).apply {
             background = rounded(0xFF333237.toInt(), 13, accent)
+            clipChildren = true
+            clipToOutline = true
             isClickable = true
             isFocusable = true
             contentDescription = "Abrir as fotos tiradas no Vortex Retro Camera"
@@ -258,9 +303,13 @@ class MainActivity : ComponentActivity() {
             scaleType = ImageView.ScaleType.CENTER_CROP
             contentDescription = "Galeria de fotografias"
             setImageResource(android.R.drawable.ic_menu_gallery)
-            setPadding(dp(2), dp(2), dp(2), dp(2))
+            setBackgroundColor(0xFF333237.toInt())
+            background = rounded(0xFF38363A.toInt(), 10)
+            clipToOutline = true
         }
-        galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1))
+        galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1).apply {
+            setMargins(dp(3), dp(3), dp(3), dp(3))
+        })
         actionRow.addView(galleryButton, LinearLayout.LayoutParams(dp(59), dp(59)))
 
         val center = FrameLayout(this)
@@ -583,6 +632,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        shutterSound.release()
         io.shutdown()
         super.onDestroy()
     }
