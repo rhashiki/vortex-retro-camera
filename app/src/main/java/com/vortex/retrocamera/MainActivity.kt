@@ -950,54 +950,142 @@ class MainActivity : ComponentActivity() {
         } else captureNow(imageCapture)
     }
 
+    private data class CaptureRecipe(
+        val film: FilmPreset,
+        val fx: FilmFxSettings,
+        val halfFrame: Boolean,
+        val dateStamp: Boolean,
+        val capturedAt: Long
+    )
+
     private fun captureNow(imageCapture: ImageCapture) {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
-        saveLabel.text = "PROCESSANDO FILME…"
-        val preset: FilmPreset = FilmCatalog.presets[selectedPreset]
-        val fx = FilmFxSettings(
-            grainStrength = grainStrength,
-            burnChance = burnChance,
-            seed = kotlin.random.Random.nextInt()
+        saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
+        val capturedGrade = if (nightMode && !nightUsingOem) {
+            // Subtle low-light shadow boost after actual frame fusion.
+            photoGrade.copy(shadows = maxOf(photoGrade.shadows, .16f))
+        } else photoGrade
+        val recipe = CaptureRecipe(
+            FilmCatalog.presets[selectedPreset],
+            FilmFxSettings(
+                grainStrength = if (nightMode) grainStrength * .70f else grainStrength,
+                burnChance = burnChance,
+                seed = kotlin.random.Random.nextInt(),
+                grade = capturedGrade
+            ),
+            halfFrame, dateStamp, System.currentTimeMillis()
         )
-        val useHalfFrame = halfFrame
-        val useDateStamp = dateStamp
-        val capturedAt = System.currentTimeMillis()
-        val tempFile = File.createTempFile("vortex-", ".jpg", cacheDir)
         if (soundEnabled) shutterSound.play()
-        shutterButton.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction {
+        shutterButton.animate().scaleX(.88f).scaleY(.88f).setDuration(80).withEndAction {
             shutterButton.animate().scaleX(1f).scaleY(1f).setDuration(170).start()
         }.start()
+        if (nightMode && !nightUsingOem) {
+            captureNightSequence(imageCapture, recipe)
+        } else {
+            captureSingle(imageCapture, recipe)
+        }
+    }
+
+    private fun captureSingle(imageCapture: ImageCapture, recipe: CaptureRecipe) {
+        val temporary = try {
+            File.createTempFile("vortex-photo-", ".jpg", cacheDir)
+        } catch (e: Exception) {
+            handleCaptureError(e)
+            return
+        }
         imageCapture.takePicture(
-            ImageCapture.OutputFileOptions.Builder(tempFile).build(), io,
+            ImageCapture.OutputFileOptions.Builder(temporary).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     try {
-                        val source = FilmProcessor.readUpright(tempFile)
-                        val result = try { FilmProcessor.process(source, preset, fx) }
-                        finally { source.recycle() }
-                        try {
-                            val presented = FilmPresentation.render(
-                                result, useHalfFrame, useDateStamp, capturedAt
-                            )
-                            try {
-                                val photoUri = saveToGallery(presented)
-                                runOnUiThread { onPhotoSaved(photoUri) }
-                            } finally {
-                                if (presented !== result) presented.recycle()
-                            }
-                        } finally { result.recycle() }
+                        val source = FilmProcessor.readUpright(temporary)
+                        processAndSave(source, recipe)
                     } catch (e: Exception) {
-                        runOnUiThread { finishCapture("Falha ao salvar foto"); toast(e.localizedMessage ?: "Erro") }
-                    } finally { tempFile.delete() }
+                        handleCaptureError(e)
+                    } finally {
+                        temporary.delete()
+                    }
                 }
                 override fun onError(exception: ImageCaptureException) {
-                    tempFile.delete()
-                    runOnUiThread { finishCapture("Erro ao fotografar"); toast(exception.localizedMessage ?: "Erro") }
+                    temporary.delete()
+                    handleCaptureError(exception)
                 }
             }
         )
+    }
+
+    private fun captureNightSequence(imageCapture: ImageCapture, recipe: CaptureRecipe) {
+        val frames = mutableListOf<File>()
+        fun finishWithError(e: Exception) {
+            frames.forEach { it.delete() }
+            handleCaptureError(e)
+        }
+        fun nextFrame() {
+            val file = try {
+                File.createTempFile("vortex-night-", ".jpg", cacheDir)
+            } catch (e: Exception) {
+                finishWithError(e)
+                return
+            }
+            imageCapture.takePicture(
+                ImageCapture.OutputFileOptions.Builder(file).build(), io,
+                object : ImageCapture.OnImageSavedCallback {
+                    override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                        frames.add(file)
+                        if (frames.size < 3) {
+                            runOnUiThread { saveLabel.text = "NOITE • QUADRO ${frames.size}/3" }
+                            nextFrame()
+                        } else {
+                            try {
+                                val merged = NightFrameFusion.merge(frames)
+                                processAndSave(merged, recipe)
+                            } catch (e: Exception) {
+                                handleCaptureError(e)
+                            } finally {
+                                frames.forEach { it.delete() }
+                            }
+                        }
+                    }
+                    override fun onError(exception: ImageCaptureException) {
+                        file.delete()
+                        finishWithError(exception)
+                    }
+                }
+            )
+        }
+        nextFrame()
+    }
+
+    private fun processAndSave(source: android.graphics.Bitmap, recipe: CaptureRecipe) {
+        try {
+            val filtered = FilmProcessor.process(source, recipe.film, recipe.fx)
+            try {
+                val presented = FilmPresentation.render(
+                    filtered, recipe.halfFrame, recipe.dateStamp, recipe.capturedAt
+                )
+                try {
+                    val uri = saveToGallery(presented)
+                    runOnUiThread { if (!isDestroyed) onPhotoSaved(uri) }
+                } finally {
+                    if (presented !== filtered) presented.recycle()
+                }
+            } finally {
+                filtered.recycle()
+            }
+        } finally {
+            source.recycle()
+        }
+    }
+
+    private fun handleCaptureError(error: Exception) {
+        runOnUiThread {
+            if (!isFinishing && !isDestroyed) {
+                finishCapture("Falha na captura • tente novamente")
+                toast(error.localizedMessage ?: "Erro ao fotografar")
+            }
+        }
     }
 
     private fun saveToGallery(image: android.graphics.Bitmap): Uri {
