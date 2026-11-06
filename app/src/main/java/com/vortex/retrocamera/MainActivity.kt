@@ -249,12 +249,10 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(3), 0, dp(3), 0)
             })
-        )
         quickRow.addView(smallButton("⚙  AJUSTES") { showOptionsSheet() },
             LinearLayout.LayoutParams(0, dp(44), 1f).apply {
                 setMargins(dp(3), 0, dp(3), 0)
             })
-        )
         root.addView(quickRow)
 
         modeStrip = LinearLayout(this).apply {
