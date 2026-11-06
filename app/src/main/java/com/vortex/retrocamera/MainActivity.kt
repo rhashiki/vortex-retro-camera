@@ -603,7 +603,9 @@ class MainActivity : ComponentActivity() {
             Mode.VIDEO -> "VÍDEO RETRÔ · em desenvolvimento (M5)"
         }
         shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
-        if (mode == Mode.PRO) applyManual() else manual?.reset()
+        if (mode == Mode.PRO) applyManual() else {
+            if (manualFocus) manual?.clearExposure() else manual?.reset()
+        }
     }
 
     private fun buildProPanel() {
@@ -686,6 +688,12 @@ class MainActivity : ComponentActivity() {
                 capture = photo
                 activeCamera = bound
                 manual = ManualCamera(bound)
+                if (manualFocus) {
+                    if (manual?.setManualFocus(focusPercent / 100f) == false) {
+                        manualFocus = false
+                        focusControlButton.text = "◎ FOCO  AF"
+                    }
+                }
                 if (mode == Mode.PRO) applyManual()
             } catch (e: Exception) {
                 toast("Não foi possível iniciar a câmera: ${e.localizedMessage}")
@@ -720,17 +728,26 @@ class MainActivity : ComponentActivity() {
         shutterButton.isEnabled = false
         saveLabel.text = "PROCESSANDO FILME…"
         val preset: FilmPreset = FilmCatalog.presets[selectedPreset]
+        val fx = FilmFxSettings(
+            grainStrength = grainStrength,
+            burnChance = burnChance,
+            seed = kotlin.random.Random.nextInt()
+        )
         val useHalfFrame = halfFrame
         val useDateStamp = dateStamp
         val capturedAt = System.currentTimeMillis()
         val tempFile = File.createTempFile("vortex-", ".jpg", cacheDir)
+        if (soundEnabled) shutterSound.play()
+        shutterButton.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).withEndAction {
+            shutterButton.animate().scaleX(1f).scaleY(1f).setDuration(170).start()
+        }.start()
         imageCapture.takePicture(
             ImageCapture.OutputFileOptions.Builder(tempFile).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                     try {
                         val source = FilmProcessor.readUpright(tempFile)
-                        val result = try { FilmProcessor.process(source, preset) }
+                        val result = try { FilmProcessor.process(source, preset, fx) }
                         finally { source.recycle() }
                         try {
                             val presented = FilmPresentation.render(
@@ -799,7 +816,13 @@ class MainActivity : ComponentActivity() {
                 contentResolver.loadThumbnail(target, Size(dp(120), dp(120)), null)
             } catch (_: Exception) { null }
             if (bitmap != null) runOnUiThread {
-                if (!isFinishing && !isDestroyed) galleryThumb.setImageBitmap(bitmap)
+                if (!isFinishing && !isDestroyed) {
+                    galleryThumb.setImageBitmap(bitmap)
+                    galleryThumb.animate().scaleX(0.96f).scaleY(0.96f)
+                        .setDuration(90).withEndAction {
+                            galleryThumb.animate().scaleX(1f).scaleY(1f).setDuration(140).start()
+                        }.start()
+                }
             }
         }
     }
