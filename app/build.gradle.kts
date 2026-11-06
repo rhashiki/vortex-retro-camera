@@ -13,8 +13,8 @@ android {
         applicationId = "com.vortex.retrocamera"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-alpha"
+        versionCode = 3
+        versionName = "0.3.0-alpha"
     }
     buildTypes {
         release {
@@ -42,6 +42,7 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+    implementation("androidx.camera:camera-extensions:$camerax")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     testImplementation("junit:junit:4.13.2")
 }
