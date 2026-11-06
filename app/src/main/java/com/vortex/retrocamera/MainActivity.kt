@@ -266,7 +266,6 @@ class MainActivity : ComponentActivity() {
             LinearLayout.LayoutParams(0, dp(46), 1f).apply {
                 setMargins(dp(2), 0, dp(2), 0)
             })
-        )
         nightButton = smallButton("☾ NOITE") { toggleNight() }
         quickRow.addView(nightButton, LinearLayout.LayoutParams(0, dp(46), 1f).apply {
             setMargins(dp(2), 0, dp(2), 0)
