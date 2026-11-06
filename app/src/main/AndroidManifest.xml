@@ -9,6 +9,10 @@
         android:roundIcon="@mipmap/ic_launcher"
         android:theme="@style/Theme.VortexRetroCamera">
         <activity
+            android:name=".GalleryActivity"
+            android:exported="false"
+            android:screenOrientation="unspecified" />
+        <activity
             android:name=".MainActivity"
             android:screenOrientation="unspecified"
             android:exported="true">
