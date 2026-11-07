@@ -1078,7 +1078,11 @@ class MainActivity : ComponentActivity() {
 
         fun refresh() {
             val available = manual?.supportsManualSensor == true
-            if (!available) {
+            if (manual == null) {
+                status.text = "AE • PREPARANDO SENSOR..."
+                aeToggle.text = "AUTO"
+                manualControls.visibility = View.GONE
+            } else if (!available) {
                 status.text = "AE AUTOMÁTICO  •  SENSOR SEM CONTROLE MANUAL"
                 aeToggle.text = "AUTO  ✓"
                 manualControls.visibility = View.GONE
@@ -1218,7 +1222,10 @@ class MainActivity : ComponentActivity() {
                     focusControlButton.text = "◎ FOCO"
                 }
             }
-            if (mode == Mode.PRO && !nightMode) applyManual()
+            if (mode == Mode.PRO && !nightMode) {
+                buildProPanel()
+                applyManual()
+            }
             if (nightMode && !nightUsingOem) {
                 // Small physical AE boost; vendor Night mode handles exposure internally.
                 val state = bound.cameraInfo.exposureState
