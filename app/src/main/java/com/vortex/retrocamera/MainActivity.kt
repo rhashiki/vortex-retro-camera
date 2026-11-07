@@ -100,6 +100,7 @@ class MainActivity : ComponentActivity() {
     private var manual: ManualCamera? = null
     private var iso = 400
     private var exposureNs = 8_000_000L // 1/125s
+    private var proManualExposure = false // PRO starts on camera auto-exposure
 
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
@@ -142,6 +143,7 @@ class MainActivity : ComponentActivity() {
             timerSeconds = state.getInt("timer", 0)
             flashSetting = Flash.entries.getOrElse(state.getInt("flash", 0)) { Flash.OFF }
             mode = Mode.entries.getOrElse(state.getInt("mode", 0)) { Mode.FOTO }
+            proManualExposure = state.getBoolean("pro_manual_exposure", false)
             if (nightMode && mode == Mode.PRO) mode = Mode.FOTO
             photoGrade = PhotoGrade(
                 brightness = state.getFloat("brightness"),
@@ -177,6 +179,7 @@ class MainActivity : ComponentActivity() {
         outState.putInt("timer", timerSeconds)
         outState.putInt("flash", flashSetting.ordinal)
         outState.putInt("mode", mode.ordinal)
+        outState.putBoolean("pro_manual_exposure", proManualExposure)
         outState.putFloat("brightness", photoGrade.brightness)
         outState.putFloat("contrast", photoGrade.contrast)
         outState.putFloat("shadows", photoGrade.shadows)
@@ -328,7 +331,7 @@ class MainActivity : ComponentActivity() {
         flashButton.setOnClickListener { cycleFlash() }
         nightButton = premiumControl("☾ NOITE", "Ativar modo noturno", "Noite")
         nightButton.setOnClickListener { toggleNight() }
-        focusControlButton = premiumControl("◎ FOCO", "Foco automático e manual", "Foco")
+        focusControlButton = premiumControl(if (manualFocus) "◎ MF" else "◎ FOCO", "Foco automático e manual", "Foco")
         focusControlButton.setOnClickListener { showFocusSheet() }
         val lightButton = premiumControl("◐ LUZ", "Brilho, contraste, sombras e cor", "Laboratório de luz")
         lightButton.setOnClickListener { showGradeSheet() }
@@ -633,7 +636,8 @@ class MainActivity : ComponentActivity() {
         build(details)
         val scroll = object : ScrollView(this) {
             override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-                val limit = (resources.displayMetrics.heightPixels * 0.63f).toInt()
+                val compactRatio = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) 0.72f else 0.49f
+                val limit = (resources.displayMetrics.heightPixels * compactRatio).toInt()
                 super.onMeasure(
                     widthMeasureSpec,
                     View.MeasureSpec.makeMeasureSpec(limit, View.MeasureSpec.AT_MOST)
@@ -874,7 +878,7 @@ class MainActivity : ComponentActivity() {
             rowAction(content, "Autofoco", "Foco contínuo + toque na cena") { _ ->
                 manualFocus = false
                 manual?.setAutoFocus()
-                focusControlButton.text = "◎ FOCO  AF"
+                focusControlButton.text = "◎ FOCO"
                 slider.isEnabled = false
                 slider.alpha = 0.35f
                 status.text = "AF • TOQUE NO VISOR PARA FOCAR"
@@ -891,7 +895,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     manualFocus = true
                     controller.setManualFocus(focusPercent / 100f)
-                    focusControlButton.text = "◎ FOCO  MF"
+                    focusControlButton.text = "◎ MF"
                     slider.isEnabled = true
                     slider.alpha = 1f
                     status.text = "MF • DESLIZE PARA AJUSTAR"
@@ -909,7 +913,8 @@ class MainActivity : ComponentActivity() {
 
     private fun focusAt(x: Float, y: Float) {
         if (manualFocus) {
-            toast("Foco manual ativo. Ajusta pelo botão FOCO.")
+            // MF uses a fixed optical distance. Ignore viewport taps silently;
+            // do not flood the screen with toasts as the user composes a shot.
             return
         }
         val camera = activeCamera ?: return
@@ -977,6 +982,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        if (next == Mode.PRO && mode != Mode.PRO) {
+            // Enter Pro with AE enabled rather than forcing ISO 400 / 1/125s.
+            proManualExposure = false
+            if (::proPanel.isInitialized) buildProPanel()
+        }
         val leavingNight = nightMode && next == Mode.PRO
         if (leavingNight) {
             nightMode = false
@@ -1013,30 +1023,95 @@ class MainActivity : ComponentActivity() {
 
     private fun buildProPanel() {
         proPanel.removeAllViews()
-        val isoText = text("ISO  $iso", 11f, accent)
-        proPanel.addView(isoText)
-        proPanel.addView(SeekBar(this).apply {
-            max = 15 // ISO 100..1600
-            progress = 3
+        proPanel.orientation = LinearLayout.VERTICAL
+
+        val status = text("", 13f, accent, Typeface.BOLD).apply {
+            setPadding(0, dp(4), 0, dp(8))
+        }
+        proPanel.addView(status)
+
+        val aeToggle = smallButton("EXPOSIÇÃO AUTOMÁTICA") {}
+        proPanel.addView(aeToggle, LinearLayout.LayoutParams(-1, dp(50)))
+
+        val manualControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        val isoText = text("", 12f, accent, Typeface.BOLD)
+        manualControls.addView(isoText)
+        manualControls.addView(SeekBar(this).apply {
+            max = 15
+            progress = (iso / 100 - 1).coerceIn(0, 15)
             setOnSeekBarChangeListener(simpleSeek { value ->
                 iso = (value + 1) * 100
                 isoText.text = "ISO  $iso"
-                applyManual()
+                if (proManualExposure) applyManual()
             })
         })
-        val shutterText = text("OBTURADOR  1/125s", 11f, accent)
-        proPanel.addView(shutterText)
-        val times = listOf(1_000_000L, 2_000_000L, 4_000_000L, 8_000_000L, 16_000_000L, 33_000_000L, 66_000_000L, 100_000_000L)
-        val labels = listOf("1/1000", "1/500", "1/250", "1/125", "1/60", "1/30", "1/15", "1/10")
-        proPanel.addView(SeekBar(this).apply {
+        val times = listOf(
+            1_000_000L, 2_000_000L, 4_000_000L, 8_000_000L,
+            16_000_000L, 33_000_000L, 66_000_000L, 100_000_000L,
+            200_000_000L, 500_000_000L
+        )
+        val labels = listOf(
+            "1/1000", "1/500", "1/250", "1/125", "1/60",
+            "1/30", "1/15", "1/10", "1/5", "1/2"
+        )
+        val shutterText = text("", 12f, accent, Typeface.BOLD).apply {
+            setPadding(0, dp(8), 0, 0)
+        }
+        manualControls.addView(shutterText)
+        manualControls.addView(SeekBar(this).apply {
             max = times.lastIndex
-            progress = 3
+            progress = times.indexOf(exposureNs).coerceAtLeast(0)
             setOnSeekBarChangeListener(simpleSeek { index ->
                 exposureNs = times[index]
                 shutterText.text = "OBTURADOR  ${labels[index]}s"
-                applyManual()
+                if (proManualExposure) applyManual()
             })
         })
+        manualControls.addView(text(
+            "Valores manuais fixam a exposição. Em ambientes escuros, aumente o tempo do obturador ou o ISO; segure o celular firme.",
+            10f, muted
+        ))
+        proPanel.addView(manualControls)
+
+        fun refresh() {
+            val available = manual?.supportsManualSensor == true
+            if (manual == null) {
+                status.text = "AE • PREPARANDO SENSOR..."
+                aeToggle.text = "AUTO"
+                manualControls.visibility = View.GONE
+            } else if (!available) {
+                status.text = "AE AUTOMÁTICO  •  SENSOR SEM CONTROLE MANUAL"
+                aeToggle.text = "AUTO  ✓"
+                manualControls.visibility = View.GONE
+                proManualExposure = false
+            } else if (proManualExposure) {
+                status.text = "M  •  EXPOSIÇÃO MANUAL"
+                aeToggle.text = "VOLTAR AO AUTO (AE)"
+                manualControls.visibility = View.VISIBLE
+            } else {
+                status.text = "AE  •  EXPOSIÇÃO AUTOMÁTICA"
+                aeToggle.text = "ATIVAR ISO / OBTURADOR MANUAIS"
+                manualControls.visibility = View.GONE
+            }
+        }
+
+        aeToggle.setOnClickListener {
+            if (manual?.supportsManualSensor != true) {
+                toast("ISO e obturador manuais não estão disponíveis nesta lente.")
+                refresh()
+                return@setOnClickListener
+            }
+            proManualExposure = !proManualExposure
+            refresh()
+            applyManual()
+        }
+        isoText.text = "ISO  $iso"
+        val activeIndex = times.indexOf(exposureNs).coerceAtLeast(0)
+        shutterText.text = "OBTURADOR  ${labels[activeIndex]}s"
+        refresh()
     }
 
     private fun simpleSeek(onUpdate: (Int) -> Unit) = object : SeekBar.OnSeekBarChangeListener {
@@ -1147,7 +1222,10 @@ class MainActivity : ComponentActivity() {
                     focusControlButton.text = "◎ FOCO"
                 }
             }
-            if (mode == Mode.PRO && !nightMode) applyManual()
+            if (mode == Mode.PRO && !nightMode) {
+                buildProPanel()
+                applyManual()
+            }
             if (nightMode && !nightUsingOem) {
                 // Small physical AE boost; vendor Night mode handles exposure internally.
                 val state = bound.cameraInfo.exposureState
@@ -1177,12 +1255,16 @@ class MainActivity : ComponentActivity() {
     private fun applyManual() {
         if (mode != Mode.PRO) return
         val cameraControl = manual ?: return
-        if (!cameraControl.supportsManualSensor) {
-            hintLabel.text = "PRO · este sensor não permite ISO/obturador manuais"
+        if (!proManualExposure || !cameraControl.supportsManualSensor) {
+            // Preserve optical MF if active; only return exposure to CameraX AE.
+            cameraControl.clearExposure()
+            hintLabel.text = if (!cameraControl.supportsManualSensor)
+                "PRO · AE AUTO • manual indisponível nesta lente"
+            else "PRO · AE AUTO • toque em PRO para ajustar"
             return
         }
         cameraControl.apply(iso, exposureNs)
-        hintLabel.text = "PRO · ISO $iso · exposição ${exposureNs / 1_000_000} ms"
+        hintLabel.text = "PRO · M  ISO $iso · ${exposureNs / 1_000_000} ms"
     }
 
     private fun takePhoto() {
