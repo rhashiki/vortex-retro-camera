@@ -372,7 +372,7 @@ class MainActivity : ComponentActivity() {
         val filmScroll = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            fillViewport = false
+            isFillViewport = false
         }
         filmScrollView = filmScroll
         presetStrip = LinearLayout(this).apply {
