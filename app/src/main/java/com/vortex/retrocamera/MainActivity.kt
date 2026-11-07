@@ -119,6 +119,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var proPanel: LinearLayout
     private lateinit var modeStrip: LinearLayout
     private lateinit var presetStrip: LinearLayout
+    private lateinit var filmScrollView: HorizontalScrollView
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else toast("A câmera precisa de permissão para funcionar.")
@@ -265,6 +266,12 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(7), dp(8), dp(7), dp(8))
         }
         brand.addView(exposureDisplay, LinearLayout.LayoutParams(-2, -2))
+        brand.addView(premiumControl("⚙", "Abrir ajustes da câmera", "Configurações").apply {
+            textSize = 17f
+            setOnClickListener { showOptionsSheet() }
+        }, LinearLayout.LayoutParams(dp(43), dp(42)).apply {
+            setMargins(dp(7), 0, 0, 0)
+        })
         chrome.addView(brand)
         val topHairline = View(this).apply { setBackgroundColor(0xFF323238.toInt()) }
         chrome.addView(topHairline, LinearLayout.LayoutParams(-1, dp(1)).apply {
@@ -321,6 +328,7 @@ class MainActivity : ComponentActivity() {
             overScrollMode = View.OVER_SCROLL_NEVER
             fillViewport = false
         }
+        filmScrollView = filmScroll
         presetStrip = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), 0, dp(4), 0)
@@ -670,7 +678,7 @@ class MainActivity : ComponentActivity() {
             // Night capture is a still-photography feature, never a fake video mode.
             setMode(Mode.FOTO)
         }
-        nightButton.text = if (nightMode) "☾ LIGADO" else "☾ NOITE"
+        updateNightButton()
         if (nightMode) {
             hintLabel.text = "NOITE: mantenha o celular parado durante a captura"
             toast("Modo noturno: captura com fusão de imagens. Segura o celular firme.")
@@ -884,23 +892,41 @@ class MainActivity : ComponentActivity() {
 
     private fun buildPresetChips() {
         presetStrip.removeAllViews()
+        var selectedView: Button? = null
         FilmCatalog.presets.forEachIndexed { index, preset ->
             val active = index == selectedPreset
-            val chip = Button(this).apply {
-                text = preset.name.replace("KODAK ", "K ").replace("FUJI ", "F ")
+            val abbreviated = preset.name
+                .replace("KODAK ", "K. ")
+                .replace("FUJICOLOR ", "FUJI ")
+                .replace("FUJI ", "F. ")
+                .replace("VORTEX ", "V. ")
+            val chip = premiumControl(abbreviated, preset.tagline, "Película " + preset.name).apply {
                 textSize = 10f
-                isAllCaps = false
-                setTextColor(if (active) bg else 0xFFD1CBC5.toInt())
-                background = rounded(
-                    if (active) accent else 0xFF2B2D33.toInt(),
-                    11,
-                    if (active) 0xFFFFDEB9.toInt() else 0xFF4F4F59.toInt()
+                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+                setTextColor(if (active) 0xFF171414.toInt() else 0xFFE1DBD2.toInt())
+                background = chromePanel(
+                    if (active) 0xFFF1D1A5.toInt() else 0xFF34343C.toInt(),
+                    12,
+                    if (active) 0xFFFFEAD0.toInt() else 0xFF53525B.toInt()
                 )
-                setOnClickListener { selectedPreset = index; updateFilm(); buildPresetChips() }
+                setOnClickListener {
+                    selectedPreset = index
+                    updateFilm()
+                    buildPresetChips()
+                }
             }
-            presetStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(49)).apply {
-                setMargins(dp(4), 0, dp(4), 0)
+            if (active) selectedView = chip
+            presetStrip.addView(chip, LinearLayout.LayoutParams(-2, dp(42)).apply {
+                setMargins(dp(3), 0, dp(3), 0)
             })
+        }
+        selectedView?.let { selected ->
+            filmScrollView.post {
+                if (!isFinishing && !isDestroyed && selected.parent === presetStrip) {
+                    val target = selected.left + selected.width / 2 - filmScrollView.width / 2
+                    filmScrollView.smoothScrollTo(target.coerceAtLeast(0), 0)
+                }
+            }
         }
     }
 
@@ -909,19 +935,23 @@ class MainActivity : ComponentActivity() {
         if (leavingNight) {
             nightMode = false
             nightUsingOem = false
-            if (::nightButton.isInitialized) nightButton.text = "☾ NOITE"
+            if (::nightButton.isInitialized) updateNightButton()
         }
         mode = next
-        if (leavingNight) startCamera()
+        if (leavingNight) {
+            updateNightButton()
+            startCamera()
+        }
         for (i in 0 until modeStrip.childCount) {
             val btn = modeStrip.getChildAt(i) as Button
             val selected = btn.tag == mode
-            btn.setTextColor(if (selected) bg else muted)
-            btn.background = rounded(
-                if (selected) accent else 0xFF27272D.toInt(), 10,
-                if (selected) 0xFFF4D6AF.toInt() else 0xFF45434B.toInt()
+            btn.setTextColor(if (selected) 0xFF211B17.toInt() else 0xFFE3D7CA.toInt())
+            btn.background = chromePanel(
+                if (selected) 0xFFE8C597.toInt() else 0xFF292A31.toInt(), 10,
+                if (selected) 0xFFFFE8C3.toInt() else 0xFF4A4A53.toInt()
             )
         }
+        // Pro controls are in a dedicated sheet; never consume viewfinder height.
         proPanel.visibility = if (mode == Mode.PRO) View.VISIBLE else View.GONE
         hintLabel.text = when (mode) {
             Mode.FOTO -> "FOTO · escolha o filme e capture"
