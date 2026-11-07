@@ -130,6 +130,28 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = bg
         window.navigationBarColor = bg
+        savedInstanceState?.let { state ->
+            selectedPreset = state.getInt("selected_preset", 0).coerceIn(0, FilmCatalog.presets.lastIndex)
+            halfFrame = state.getBoolean("half_frame")
+            dateStamp = state.getBoolean("date_stamp")
+            manualFocus = state.getBoolean("manual_focus")
+            focusPercent = state.getInt("focus_percent", 0)
+            grainStrength = state.getFloat("grain", 1.6f)
+            burnChance = state.getFloat("burn", .16f)
+            nightMode = state.getBoolean("night_mode")
+            timerSeconds = state.getInt("timer", 0)
+            flashSetting = Flash.entries.getOrElse(state.getInt("flash", 0)) { Flash.OFF }
+            mode = Mode.entries.getOrElse(state.getInt("mode", 0)) { Mode.FOTO }
+            if (nightMode && mode == Mode.PRO) mode = Mode.FOTO
+            photoGrade = PhotoGrade(
+                brightness = state.getFloat("brightness"),
+                contrast = state.getFloat("contrast"),
+                shadows = state.getFloat("shadows"),
+                highlights = state.getFloat("highlights"),
+                saturation = state.getFloat("saturation"),
+                warmth = state.getFloat("warmth")
+            )
+        }
         buildInterface()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -143,6 +165,27 @@ class MainActivity : ComponentActivity() {
      * and cannot be pushed off-screen by Pro controls, film chips or panels.
      * Secondary settings live in scrollable bottom sheets.
      */
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putInt("selected_preset", selectedPreset)
+        outState.putBoolean("half_frame", halfFrame)
+        outState.putBoolean("date_stamp", dateStamp)
+        outState.putBoolean("manual_focus", manualFocus)
+        outState.putInt("focus_percent", focusPercent)
+        outState.putFloat("grain", grainStrength)
+        outState.putFloat("burn", burnChance)
+        outState.putBoolean("night_mode", nightMode)
+        outState.putInt("timer", timerSeconds)
+        outState.putInt("flash", flashSetting.ordinal)
+        outState.putInt("mode", mode.ordinal)
+        outState.putFloat("brightness", photoGrade.brightness)
+        outState.putFloat("contrast", photoGrade.contrast)
+        outState.putFloat("shadows", photoGrade.shadows)
+        outState.putFloat("highlights", photoGrade.highlights)
+        outState.putFloat("saturation", photoGrade.saturation)
+        outState.putFloat("warmth", photoGrade.warmth)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun buildInterface() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val root = FrameLayout(this).apply {
@@ -179,7 +222,10 @@ class MainActivity : ComponentActivity() {
         }
         previewTint = View(this).apply { isClickable = false }
         viewfinderFrame.addView(previewTint, FrameLayout.LayoutParams(-1, -1))
-        frameGuide = RetroViewfinderOverlay(this).apply { isClickable = false }
+        frameGuide = RetroViewfinderOverlay(this).apply {
+            isClickable = false
+            halfFrame = this@MainActivity.halfFrame
+        }
         viewfinderFrame.addView(frameGuide, FrameLayout.LayoutParams(-1, -1))
 
         // Floating focus point remains above film preview, below toolbars.
