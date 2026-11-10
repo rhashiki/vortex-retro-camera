@@ -664,34 +664,85 @@ class MainActivity : ComponentActivity() {
         }
         lower.addView(saveLabel)
 
+        // Reorder panels exactly as in the reference:
+        // viewfinder → mode bar → shutter → filter drawer.
+        // Only the filter drawer expands; other actions remain accessible.
+        lower.removeView(captureDock)
+        lower.removeView(navScroller)
+        lower.removeView(saveLabel)
+        lower.removeView(quickEdits)
+        lower.removeView(filmChooserButton)
+        lower.removeView(filterDrawer)
+        lower.removeAllViews()
+        creativeRow = quickEdits
+        creativeRow.visibility = View.GONE
+        filmChooserButton.background = neonPanel(
+            0xF0181223.toInt(), 17, 0xFF624075.toInt()
+        )
+        filmChooserButton.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        filmChooserButton.setPadding(dp(14), 0, dp(14), 0)
+        filmChooserButton.textSize = 12f
+        filmChooserButton.setSingleLine(true)
+        filmChooserButton.ellipsize = android.text.TextUtils.TruncateAt.END
+        lower.setPadding(dp(7), dp(5), dp(7), dp(7))
+        lower.background = neonPanel(0xF0120B1D.toInt(), 20, 0xFF3A2250.toInt())
+        lower.addView(filmChooserButton, LinearLayout.LayoutParams(-1, dp(44)))
+        lower.addView(filterDrawer, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(0, dp(3), 0, dp(3))
+        })
+        lower.addView(creativeRow, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            setMargins(0, dp(3), 0, 0)
+        })
+
         if (landscape) {
-            // Controls in a right-hand rail; live view remains the full left pane.
+            // Landscape has a large left viewport and fixed right-side controls.
+            root.addView(viewfinderFrame, FrameLayout.LayoutParams(-1, -1).apply {
+                setMargins(dp(4), dp(4), dp(326), dp(4))
+            })
             val rail = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = neonPanel(0xEB0C0913.toInt(), 22, 0xB244285C.toInt())
+                background = neonPanel(0xF00E0917.toInt(), 18, 0xFF4F3262.toInt())
             }
-            rail.addView(chromeRoot)
-            // Pin shutter + mode bar: only secondary film tools scroll in landscape.
-            lower.removeView(captureDock)
-            lower.removeView(navRow)
-            lower.removeView(saveLabel)
+            val scrollArea = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            scrollArea.addView(chromeRoot)
+            scrollArea.addView(lower)
             val scroll = ScrollView(this).apply {
                 isVerticalScrollBarEnabled = false
                 isFillViewport = false
+                addView(scrollArea)
             }
-            scroll.addView(lower)
             rail.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-            rail.addView(captureDock)
-            rail.addView(navRow)
+            rail.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)))
+            rail.addView(captureDock, LinearLayout.LayoutParams(-1, dp(96)))
             root.addView(rail, FrameLayout.LayoutParams(dp(320), -1, Gravity.RIGHT).apply {
-                setMargins(0, dp(3), dp(5), dp(3))
+                setMargins(0, dp(3), dp(4), dp(3))
             })
         } else {
-            root.addView(chromeRoot, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply {
-                setMargins(dp(6), dp(4), dp(6), 0)
+            val stack = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(0xFF08050D.toInt())
+            }
+            root.addView(stack, FrameLayout.LayoutParams(-1, -1))
+            stack.addView(chromeRoot, LinearLayout.LayoutParams(-1, -2))
+            stack.addView(viewfinderFrame, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+                setMargins(dp(7), dp(4), dp(7), dp(4))
             })
-            root.addView(lower, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            stack.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)).apply {
+                setMargins(dp(8), 0, dp(8), dp(2))
+            })
+            stack.addView(captureDock, LinearLayout.LayoutParams(-1, dp(96)).apply {
+                setMargins(dp(7), 0, dp(7), dp(1))
+            })
+            stack.addView(lower, LinearLayout.LayoutParams(-1, -2).apply {
+                setMargins(dp(6), 0, dp(6), dp(3))
+            })
         }
+        // This status is overlaid within the camera rather than taking a
+        // separate permanent row below the shutter.
+        viewfinderFrame.addView(saveLabel, FrameLayout.LayoutParams(-2, -2,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(67) })
         updateFilm()
         setMode(mode)
         refreshGalleryThumbnail()
