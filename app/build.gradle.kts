@@ -13,8 +13,8 @@ android {
         applicationId = "com.vortex.retrocamera"
         minSdk = 29
         targetSdk = 35
-        versionCode = 6
-        versionName = "0.5.2-alpha"
+        versionCode = 7
+        versionName = "0.5.3-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
