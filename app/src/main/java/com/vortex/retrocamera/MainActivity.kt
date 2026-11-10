@@ -322,82 +322,136 @@ class MainActivity : ComponentActivity() {
 
         val titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(4))
+            setPadding(dp(11), dp(7), dp(8), dp(7))
         }
-        val mark = text("◉", 24f, 0xFFAF55FF.toInt(), Typeface.BOLD)
-        titleRow.addView(mark, LinearLayout.LayoutParams(dp(29), -2))
-        val brand = text(if (landscape) "Vortex" else "Vortex Camera",
-            if (landscape) 15f else 14f, Color.WHITE, Typeface.BOLD).apply {
+        titleRow.addView(text("◉", 29f, 0xFFB654FF.toInt(), Typeface.BOLD),
+            LinearLayout.LayoutParams(dp(38), dp(42)))
+        titleRow.addView(text("Vortex Camera", if (landscape) 14f else 17f,
+            Color.WHITE, Typeface.BOLD).apply {
             setSingleLine()
             ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        titleRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        val proBadge = neonButton("Pro", "Controles profissionais").apply {
+        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        titleRow.addView(neonButton("Pro", "Acessar modo profissional").apply {
             textSize = 11f
-            background = neonPanel(0xFF6615B9.toInt(), 10, 0xFFB573FC.toInt())
+            background = neonPanel(0xFF7113BC.toInt(), 11, 0xFFB963F2.toInt())
             setOnClickListener { setMode(Mode.PRO); showProSheet() }
-        }
-        titleRow.addView(proBadge, LinearLayout.LayoutParams(dp(42), dp(32)).apply {
-            setMargins(dp(3), 0, dp(2), 0)
+        }, LinearLayout.LayoutParams(dp(44), dp(31)).apply {
+            setMargins(dp(3), 0, dp(6), 0)
         })
+        if (!landscape) {
+            titleRow.addView(text("Fotografia clássica,\npoder moderno", 9f,
+                0xFFBBB0C8.toInt()).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+            }, LinearLayout.LayoutParams(dp(91), dp(42)))
+        }
+        titleRow.addView(neonButton("ⓘ", "Sobre o Vortex Retro Camera").apply {
+            textSize = 17f
+            setOnClickListener {
+                toast("Vortex Retro Camera • nativo, privado e sem processamento em nuvem.")
+            }
+        }, LinearLayout.LayoutParams(dp(35), dp(36)))
         chromeRoot.addView(titleRow)
 
+        // Round quick tools with label below each control, like the supplied
+        // reference. Scrolls only on narrow phones instead of compressing text.
         val featureRail = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(7), dp(1), dp(7), dp(4))
-        }
-        flashButton = neonButton("ϟ OFF", "Flash desligado, automático ou ligado").apply {
-            setOnClickListener { cycleFlash() }
-        }
-        featureRail.addView(flashButton, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        val hdr = neonButton("HDR", "HDR em desenvolvimento").apply {
-            setOnClickListener { toast("HDR inteligente ainda está em desenvolvimento.") }
-        }
-        featureRail.addView(hdr, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        val ai = neonButton("✦ AI", "Vortex AI Engine ainda em desenvolvimento").apply {
-            setOnClickListener {
-                toast("A IA offline ainda não foi integrada; nenhuma foto é enviada para a nuvem.")
-            }
-        }
-        featureRail.addView(ai, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        featureRail.addView(neonButton("⚙", "Abrir configurações").apply {
-            textSize = 19f
-            setOnClickListener { showOptionsSheet() }
-        }, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        chromeRoot.addView(featureRail)
-
-        val indicators = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(9), dp(7), dp(9), dp(6))
+            setPadding(dp(5), dp(5), dp(5), dp(5))
         }
-        exposureDisplay = text("EXPO 000", 10f, 0xFFECE4F5.toInt(), Typeface.BOLD).apply {
-            setSingleLine()
-            setPadding(dp(9), dp(10), dp(9), dp(10))
-            background = neonPanel(0xAC0A0A13.toInt(), 17, 0x645D496F)
+        val featureScroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            background = neonPanel(0xEA110C1B.toInt(), 19, 0xFF533267.toInt())
         }
-        indicators.addView(exposureDisplay, LinearLayout.LayoutParams(-2, -2))
-        indicators.addView(text("  •  4:3  •  JPEG", 10f, 0xFFCDC5D9.toInt()))
+        fun addFeature(
+            symbol: String, caption: String, accessibility: String,
+            action: () -> Unit, highlight: Boolean = false
+        ): Button {
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(2), dp(3), dp(2), dp(3))
+            }
+            val icon = neonButton(symbol, accessibility).apply {
+                textSize = if (symbol.length > 2) 11f else 20f
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (highlight) 0xFF60159C.toInt() else 0xFF1B1824.toInt())
+                    setStroke(dp(1), if (highlight) 0xFFCB73FF.toInt() else 0xFF625079.toInt())
+                }
+                setOnClickListener { action() }
+            }
+            item.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
+            val label = text(caption, 9f, 0xFFF0E7F5.toInt()).apply {
+                gravity = Gravity.CENTER
+                setSingleLine()
+            }
+            item.addView(label, LinearLayout.LayoutParams(-1, dp(22)))
+            featureRail.addView(item, LinearLayout.LayoutParams(dp(54), dp(71)))
+            if (caption == "Flash") flashStatusLabel = label
+            return icon
+        }
+        flashButton = addFeature("ϟ", "Flash", "Modo do flash") { cycleFlash() }
+        addFeature("HDR", "HDR", "HDR em desenvolvimento", {
+            toast("HDR inteligente ainda não está disponível.")
+        }, highlight = false)
+        addFeature("RAW", "RAW", "Captura RAW em desenvolvimento", {
+            toast("Captura RAW ainda não está implementada.")
+        })
+        addFeature("✦", "IA", "Vortex AI offline em desenvolvimento", {
+            toast("A IA offline ainda não foi incorporada; nenhuma foto é enviada.")
+        }, highlight = true)
+        addFeature("◷", "Timer", "Temporizador", {
+            timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
+            toast("Temporizador: " + timerSeconds + " segundos")
+        })
+        addFeature("4:3", "Formato", "Proporção de captura", {
+            toast("Captura nativa em 4:3 • JPEG. Outras proporções em desenvolvimento.")
+        })
+        addFeature("⚙", "Config.", "Configurações", { showOptionsSheet() })
+        featureScroller.addView(featureRail)
+        chromeRoot.addView(featureScroller, LinearLayout.LayoutParams(-1, dp(82)).apply {
+            setMargins(dp(6), 0, dp(6), dp(4))
+        })
+
+        // Preview badges: histogram left, actual capture format right. The
+        // graph is live luma and not decorative RGB bars.
         histogramView = LumaHistogramView(this).apply {
-            background = neonPanel(0xBE0A0814.toInt(), 13, 0x785F4D81)
+            background = neonPanel(0xBA0B0A14.toInt(), 12, 0xFF604378.toInt())
         }
-        indicators.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        indicators.addView(histogramView, LinearLayout.LayoutParams(dp(111), dp(61)))
-        if (landscape) {
-            viewfinderFrame.addView(indicators,
-                FrameLayout.LayoutParams(dp(250), dp(70), Gravity.TOP or Gravity.LEFT).apply {
-                    setMargins(dp(7), dp(9), 0, 0)
-                })
-        } else {
-            chromeRoot.addView(indicators)
+        viewfinderFrame.addView(histogramView,
+            FrameLayout.LayoutParams(dp(104), dp(57), Gravity.TOP or Gravity.LEFT).apply {
+                setMargins(dp(10), dp(10), 0, 0)
+            })
+        val captureFormat = text("4:3  •  JPEG", 10f, Color.WHITE, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = neonPanel(0xBC0C0B15.toInt(), 17, 0xFF493457.toInt())
+            setPadding(dp(10), dp(7), dp(10), dp(7))
         }
+        viewfinderFrame.addView(captureFormat,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT).apply {
+                setMargins(0, dp(11), dp(11), 0)
+            })
+        exposureDisplay = text("EXPO 000", 10f, 0xFFE4D0F6.toInt(), Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = neonPanel(0xAA0C0B15.toInt(), 13, 0xFF624576.toInt())
+            setPadding(dp(9), dp(5), dp(9), dp(5))
+        }
+        viewfinderFrame.addView(exposureDisplay,
+            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.RIGHT).apply {
+                setMargins(0, 0, dp(12), dp(10))
+            })
+
+        zoomQuickStrip = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(3), dp(2), dp(3), dp(2))
+            background = neonPanel(0xB70D0915.toInt(), 21, 0xFF70518C.toInt())
+        }
+        viewfinderFrame.addView(zoomQuickStrip,
+            FrameLayout.LayoutParams(-2, dp(36), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = dp(10)
+            })
 
         filmLabel = text(FilmCatalog.presets[selectedPreset].name, 12f, Color.WHITE, Typeface.BOLD)
         filmTagline = text(FilmCatalog.presets[selectedPreset].tagline, 9f, 0xFFD4B7F1.toInt())
