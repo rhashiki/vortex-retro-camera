@@ -45,7 +45,7 @@ jobs:
             adb pull /sdcard/vortex-premium-collapsed.png vortex-premium-collapsed.png
             adb shell uiautomator dump /sdcard/vortex-window.xml
             adb pull /sdcard/vortex-window.xml vortex-window.xml
-            python3 -c 'import re,xml.etree.ElementTree as ET,subprocess; r=ET.parse("vortex-window.xml").getroot(); n=next((n for n in r.iter("node") if n.get("content-desc")=="Selecionar película fotográfica"),None); assert n is not None,"Filter toggle is missing"; p=list(map(int,re.findall(r"\d+",n.get("bounds")))); subprocess.run(["adb","shell","input","tap",str((p[0]+p[2])//2),str((p[1]+p[3])//2)],check=True)'
+            python3 -c 'import re,xml.etree.ElementTree as ET,subprocess; r=ET.parse("vortex-window.xml").getroot(); n=next((n for n in r.iter("node") if n.get("content-desc")=="Abrir filtros retrô"),None); assert n is not None,"Retro filter action is missing"; p=list(map(int,re.findall(r"\d+",n.get("bounds")))); subprocess.run(["adb","shell","input","tap",str((p[0]+p[2])//2),str((p[1]+p[3])//2)],check=True)'
             sleep 2
             adb shell screencap -p /sdcard/vortex-premium-expanded.png
             adb pull /sdcard/vortex-premium-expanded.png vortex-premium-expanded.png
