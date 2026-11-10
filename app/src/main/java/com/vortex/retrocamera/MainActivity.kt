@@ -269,7 +269,7 @@ class MainActivity : ComponentActivity() {
             background = neonPanel(0xB10E0A18.toInt(), 22, 0x8067518A.toInt())
         }
         viewfinderFrame.addView(zoomStrip, FrameLayout.LayoutParams(dp(56), -2, Gravity.RIGHT or Gravity.CENTER_VERTICAL).apply {
-            setMargins(0, 0, dp(if (landscape) 265 else 13), 0)
+            setMargins(0, 0, dp(if (landscape) 329 else 13), 0)
         })
 
         // Focal indicator/label and real photo exposure status.
@@ -583,7 +583,7 @@ class MainActivity : ComponentActivity() {
             rail.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             rail.addView(captureDock)
             rail.addView(navRow)
-            root.addView(rail, FrameLayout.LayoutParams(dp(285), -1, Gravity.RIGHT).apply {
+            root.addView(rail, FrameLayout.LayoutParams(dp(320), -1, Gravity.RIGHT).apply {
                 setMargins(0, dp(3), dp(5), dp(3))
             })
         } else {
