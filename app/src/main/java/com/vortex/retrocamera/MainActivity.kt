@@ -1341,13 +1341,54 @@ class MainActivity : ComponentActivity() {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             val photo = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
                 .setFlashMode(ImageCapture.FLASH_MODE_OFF)
                 .build()
+            // Real preview luminance histogram. OEM extension pipelines do not
+            // always support ImageAnalysis, so fall back to Preview+ImageCapture.
+            val analyzer = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            analyzer.setAnalyzer(histogramExecutor) { image ->
+                try {
+                    val plane = image.planes[0]
+                    val yBuffer = plane.buffer
+                    val stepX = (image.width / 64).coerceAtLeast(1)
+                    val stepY = (image.height / 42).coerceAtLeast(1)
+                    val buckets = IntArray(32)
+                    val maxIndex = yBuffer.limit()
+                    for (y in 0 until image.height step stepY) {
+                        val base = y * plane.rowStride
+                        for (x in 0 until image.width step stepX) {
+                            val index = base + x * plane.pixelStride
+                            if (index in 0 until maxIndex) {
+                                val luma = yBuffer.get(index).toInt() and 0xFF
+                                buckets[(luma / 8).coerceIn(0, 31)]++
+                            }
+                        }
+                    }
+                    histogramView.submit(buckets)
+                } finally {
+                    image.close()
+                }
+            }
             provider.unbindAll()
-            val bound = provider.bindToLifecycle(this, selector, preview, photo)
+            val bound = try {
+                provider.bindToLifecycle(this, selector, preview, photo, analyzer)
+            } catch (_: Exception) {
+                histogramView.showUnavailable()
+                provider.unbindAll()
+                provider.bindToLifecycle(this, selector, preview, photo)
+            }
             capture = photo
             activeCamera = bound
+            zoomRatio = zoomRatio.coerceIn(
+                bound.cameraInfo.zoomState.value?.minZoomRatio ?: 1f,
+                bound.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
+            )
+            bound.cameraControl.setZoomRatio(zoomRatio)
+            rebuildZoomControls()
             nightUsingOem = nightMode && useOemNight
             manual = try { ManualCamera(bound) } catch (_: Exception) { null }
             if (manualFocus && !nightMode) {
