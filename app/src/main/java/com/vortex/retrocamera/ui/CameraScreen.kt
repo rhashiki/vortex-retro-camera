@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -350,8 +352,6 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                 rgb.green to Color(0x990AFF77),
                 rgb.blue to Color(0xAA3D72FF)
             )
-            val maxValue = triples.maxOfOrNull { (_, _) -> 1 } ?: 1
-            @Suppress("UNUSED_VARIABLE") val ignored = maxValue
             triples.forEach { (hist, color) ->
                 if (hist.isEmpty()) return@forEach
                 val maximum = hist.maxOrNull()?.coerceAtLeast(1)?.toFloat() ?: 1f
@@ -500,7 +500,12 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                 else name == snapshot.mode && !snapshot.night
             Column(
                 Modifier.weight(1f).fillMaxHeight()
-                    .glass(22.dp, selected).clickable {
+                    .glass(22.dp, selected)
+                    .testTag("mode_" + name.lowercase())
+                    .semantics {
+                        if (name == "Retrô") contentDescription = "Abrir filtros retrô"
+                    }
+                    .clickable {
                         when (name) {
                             "Retrô" -> onRetro()
                             else -> actions.chooseMode(name)
