@@ -131,6 +131,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var filmScrollView: HorizontalScrollView
     private lateinit var filterDrawer: FilmFilterDrawer
     private lateinit var filtersQuickButton: Button
+    private lateinit var creativeRow: LinearLayout
+    private lateinit var nightCaptureButton: Button
+    private lateinit var flashStatusLabel: TextView
+    private lateinit var zoomQuickStrip: LinearLayout
     @Volatile private var filterDrawerOpen = false
     @Volatile private var filterPreviewGeneration = 0
     private var previewRetries = 0
@@ -210,7 +214,7 @@ class MainActivity : ComponentActivity() {
     private fun buildInterface() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val root = FrameLayout(this).apply {
-            setBackgroundColor(0xFF08060E.toInt())
+            setBackgroundColor(0xFF07040C.toInt())
         }
         setContentView(root)
         // These controls are used by setMode() during initial construction,
@@ -232,8 +236,13 @@ class MainActivity : ComponentActivity() {
         }
         ViewCompat.requestApplyInsets(root)
 
-        viewfinderFrame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        root.addView(viewfinderFrame, FrameLayout.LayoutParams(-1, -1))
+        viewfinderFrame = FrameLayout(this).apply {
+            contentDescription = "Visor da câmera"
+            setBackgroundColor(Color.BLACK)
+            background = rounded(0xFF101016.toInt(), 18, 0xFF593471.toInt())
+            clipToOutline = true
+            clipChildren = true
+        }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -304,7 +313,7 @@ class MainActivity : ComponentActivity() {
         }
         focusHint.addView(hintLabel)
         viewfinderFrame.addView(focusHint, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
-            bottomMargin = if (landscape) dp(25) else dp(270)
+            bottomMargin = dp(54)
         })
 
         val chromeRoot = LinearLayout(this).apply {
@@ -314,82 +323,142 @@ class MainActivity : ComponentActivity() {
 
         val titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(8), dp(8), dp(8), dp(4))
+            setPadding(dp(10), dp(3), dp(8), dp(3))
         }
-        val mark = text("◉", 24f, 0xFFAF55FF.toInt(), Typeface.BOLD)
-        titleRow.addView(mark, LinearLayout.LayoutParams(dp(29), -2))
-        val brand = text(if (landscape) "Vortex" else "Vortex Camera",
-            if (landscape) 15f else 14f, Color.WHITE, Typeface.BOLD).apply {
+        titleRow.addView(VortexApertureMark(this),
+            LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+                setMargins(0, 0, dp(3), 0)
+            })
+        titleRow.addView(text("Vortex Camera", if (landscape) 14f else 17f,
+            Color.WHITE, Typeface.BOLD).apply {
             setSingleLine()
             ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        titleRow.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        val proBadge = neonButton("Pro", "Controles profissionais").apply {
+        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        titleRow.addView(neonButton("Pro", "Acessar modo profissional").apply {
             textSize = 11f
-            background = neonPanel(0xFF6615B9.toInt(), 10, 0xFFB573FC.toInt())
+            background = neonPanel(0xFF7113BC.toInt(), 11, 0xFFB963F2.toInt())
             setOnClickListener { setMode(Mode.PRO); showProSheet() }
-        }
-        titleRow.addView(proBadge, LinearLayout.LayoutParams(dp(42), dp(32)).apply {
-            setMargins(dp(3), 0, dp(2), 0)
+        }, LinearLayout.LayoutParams(dp(44), dp(31)).apply {
+            setMargins(dp(3), 0, dp(6), 0)
         })
+        if (!landscape) {
+            titleRow.addView(text("Fotografia clássica,\npoder moderno", 9f,
+                0xFFBBB0C8.toInt()).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                typeface = Typeface.create("sans-serif", Typeface.ITALIC)
+            }, LinearLayout.LayoutParams(dp(91), dp(42)))
+        }
+        titleRow.addView(neonButton("ⓘ", "Sobre o Vortex Retro Camera").apply {
+            textSize = 17f
+            setOnClickListener {
+                toast("Vortex Retro Camera • nativo, privado e sem processamento em nuvem.")
+            }
+        }, LinearLayout.LayoutParams(dp(35), dp(36)))
         chromeRoot.addView(titleRow)
 
+        // Round quick tools with label below each control, like the supplied
+        // reference. Scrolls only on narrow phones instead of compressing text.
         val featureRail = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            setPadding(dp(7), dp(1), dp(7), dp(4))
-        }
-        flashButton = neonButton("ϟ OFF", "Flash desligado, automático ou ligado").apply {
-            setOnClickListener { cycleFlash() }
-        }
-        featureRail.addView(flashButton, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        val hdr = neonButton("HDR", "HDR em desenvolvimento").apply {
-            setOnClickListener { toast("HDR inteligente ainda está em desenvolvimento.") }
-        }
-        featureRail.addView(hdr, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        val ai = neonButton("✦ AI", "Vortex AI Engine ainda em desenvolvimento").apply {
-            setOnClickListener {
-                toast("A IA offline ainda não foi integrada; nenhuma foto é enviada para a nuvem.")
-            }
-        }
-        featureRail.addView(ai, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        featureRail.addView(neonButton("⚙", "Abrir configurações").apply {
-            textSize = 19f
-            setOnClickListener { showOptionsSheet() }
-        }, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
-            setMargins(dp(2), 0, dp(2), 0)
-        })
-        chromeRoot.addView(featureRail)
-
-        val indicators = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(9), dp(7), dp(9), dp(6))
+            setPadding(dp(5), dp(2), dp(5), dp(2))
         }
-        exposureDisplay = text("EXPO 000", 10f, 0xFFECE4F5.toInt(), Typeface.BOLD).apply {
-            setSingleLine()
-            setPadding(dp(9), dp(10), dp(9), dp(10))
-            background = neonPanel(0xAC0A0A13.toInt(), 17, 0x645D496F)
+        val featureScroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            background = neonPanel(0xEA110C1B.toInt(), 19, 0xFF533267.toInt())
         }
-        indicators.addView(exposureDisplay, LinearLayout.LayoutParams(-2, -2))
-        indicators.addView(text("  •  4:3  •  JPEG", 10f, 0xFFCDC5D9.toInt()))
+        fun addFeature(
+            symbol: String, caption: String, accessibility: String,
+            action: () -> Unit, highlight: Boolean = false
+        ): Button {
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(2), dp(3), dp(2), dp(3))
+            }
+            val icon = neonButton(symbol, accessibility).apply {
+                textSize = if (symbol.length > 2) 11f else 20f
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(if (highlight) 0xFF60159C.toInt() else 0xFF1B1824.toInt())
+                    setStroke(dp(1), if (highlight) 0xFFCB73FF.toInt() else 0xFF625079.toInt())
+                }
+                setOnClickListener { action() }
+            }
+            item.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
+            val label = text(caption, 9f, 0xFFF0E7F5.toInt()).apply {
+                gravity = Gravity.CENTER
+                setSingleLine()
+            }
+            item.addView(label, LinearLayout.LayoutParams(-1, dp(17)))
+            featureRail.addView(item, LinearLayout.LayoutParams(dp(51), dp(56)))
+            if (caption == "Flash") flashStatusLabel = label
+            return icon
+        }
+        flashButton = addFeature("ϟ", "Flash", "Modo do flash", { cycleFlash() })
+        addFeature("HDR", "HDR", "HDR em desenvolvimento", {
+            toast("HDR inteligente ainda não está disponível.")
+        }, highlight = false)
+        addFeature("RAW", "RAW", "Captura RAW em desenvolvimento", {
+            toast("Captura RAW ainda não está implementada.")
+        })
+        addFeature("✦", "IA", "Vortex AI offline em desenvolvimento", {
+            toast("A IA offline ainda não foi incorporada; nenhuma foto é enviada.")
+        }, highlight = true)
+        addFeature("◷", "Timer", "Temporizador", {
+            timerSeconds = when (timerSeconds) { 0 -> 3; 3 -> 10; else -> 0 }
+            toast("Temporizador: " + timerSeconds + " segundos")
+        })
+        addFeature("4:3", "Formato", "Proporção de captura", {
+            toast("Captura nativa em 4:3 • JPEG. Outras proporções em desenvolvimento.")
+        })
+        addFeature("⚙", "Config.", "Configurações", { showOptionsSheet() })
+        featureScroller.addView(featureRail)
+        chromeRoot.addView(featureScroller, LinearLayout.LayoutParams(-1, dp(64)).apply {
+            setMargins(dp(6), 0, dp(6), dp(4))
+        })
+
+        // Preview badges: histogram left, actual capture format right. The
+        // graph is live luma and not decorative RGB bars.
         histogramView = LumaHistogramView(this).apply {
-            background = neonPanel(0xBE0A0814.toInt(), 13, 0x785F4D81)
+            background = neonPanel(0xBA0B0A14.toInt(), 12, 0xFF604378.toInt())
         }
-        indicators.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        indicators.addView(histogramView, LinearLayout.LayoutParams(dp(111), dp(61)))
-        if (landscape) {
-            viewfinderFrame.addView(indicators,
-                FrameLayout.LayoutParams(dp(250), dp(70), Gravity.TOP or Gravity.LEFT).apply {
-                    setMargins(dp(7), dp(9), 0, 0)
-                })
-        } else {
-            chromeRoot.addView(indicators)
+        viewfinderFrame.addView(histogramView,
+            FrameLayout.LayoutParams(dp(104), dp(57), Gravity.TOP or Gravity.LEFT).apply {
+                setMargins(dp(10), dp(10), 0, 0)
+            })
+        val captureFormat = text("4:3  •  JPEG", 10f, Color.WHITE, Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = neonPanel(0xBC0C0B15.toInt(), 17, 0xFF493457.toInt())
+            setPadding(dp(10), dp(7), dp(10), dp(7))
         }
+        viewfinderFrame.addView(captureFormat,
+            FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT).apply {
+                setMargins(0, dp(11), dp(11), 0)
+            })
+        exposureDisplay = text("EXPO 000", 10f, 0xFFE4D0F6.toInt(), Typeface.BOLD).apply {
+            gravity = Gravity.CENTER
+            background = neonPanel(0xAA0C0B15.toInt(), 13, 0xFF624576.toInt())
+            setPadding(dp(9), dp(5), dp(9), dp(5))
+        }
+        viewfinderFrame.addView(exposureDisplay,
+            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.RIGHT).apply {
+                setMargins(0, 0, dp(12), dp(10))
+            })
+
+        zoomQuickStrip = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(3), dp(2), dp(3), dp(2))
+            background = neonPanel(0xB70D0915.toInt(), 21, 0xFF70518C.toInt())
+        }
+        viewfinderFrame.addView(zoomQuickStrip,
+            FrameLayout.LayoutParams(-2, dp(36), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = dp(10)
+            })
+        viewfinderFrame.addView(CameraLevelView(this),
+            FrameLayout.LayoutParams(dp(65), dp(65), Gravity.BOTTOM or Gravity.LEFT).apply {
+                setMargins(dp(12), 0, 0, dp(12))
+            })
 
         filmLabel = text(FilmCatalog.presets[selectedPreset].name, 12f, Color.WHITE, Typeface.BOLD)
         filmTagline = text(FilmCatalog.presets[selectedPreset].tagline, 9f, 0xFFD4B7F1.toInt())
@@ -437,9 +506,13 @@ class MainActivity : ComponentActivity() {
             return action
         }
         addTool("≡ Ajustes", { showGradeSheet() }, 1.1f)
-        filtersQuickButton = addTool("◉ Filtros", { showFilmPicker() }, 1f)
-        addTool("✦ Efeitos", { showFilmSheet() }, 1f)
-        addTool("▦ Grão", { showFilmSheet() }, .9f)
+        filtersQuickButton = addTool("✦ Efeitos", { showFilmSheet() }, 1f)
+        addTool("▦ Grão", { showFilmSheet() }, 1f)
+        addTool("◖ Queima", { showFilmSheet() }, .95f)
+        addTool("▤ Data", {
+            dateStamp = !dateStamp
+            toast(if (dateStamp) "Carimbo de data ativado" else "Carimbo de data desativado")
+        }, .8f)
         lower.addView(quickEdits)
         filmChooserButton = neonButton("▣ Vintage 200  ›", "Selecionar película fotográfica").apply {
             textSize = 11f
@@ -452,11 +525,13 @@ class MainActivity : ComponentActivity() {
         })
 
         val captureDock = LinearLayout(this).apply {
+            contentDescription = "Área de disparo"
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(5), dp(7), dp(5), dp(6))
+            setPadding(dp(9), dp(2), dp(9), dp(2))
+            background = neonPanel(0xDE090611.toInt(), 16, 0xFF291934.toInt())
         }
         val galleryButton = FrameLayout(this).apply {
-            background = neonPanel(0xFF21132F.toInt(), 15, 0xFF8E58C3.toInt())
+            background = neonPanel(0xFF261831.toInt(), 15, 0xFFB578D2.toInt())
             clipChildren = true
             clipToOutline = true
             isClickable = true
@@ -467,56 +542,42 @@ class MainActivity : ComponentActivity() {
         galleryThumb = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(android.R.drawable.ic_menu_gallery)
-            background = neonPanel(0xFF1E1828.toInt(), 11)
+            background = neonPanel(0xFF21172D.toInt(), 11)
             clipToOutline = true
-            contentDescription = "Última foto"
+            contentDescription = "Última fotografia salva"
         }
         galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1).apply {
             setMargins(dp(3), dp(3), dp(3), dp(3))
         })
-        captureDock.addView(galleryButton, LinearLayout.LayoutParams(dp(56), dp(56)))
-        captureDock.addView(neonButton("▧", "Abrir galeria").apply {
-            textSize = 23f
-            setOnClickListener { startActivity(Intent(this@MainActivity, GalleryActivity::class.java)) }
-        }, LinearLayout.LayoutParams(dp(43), dp(50)).apply {
-            setMargins(dp(6), 0, 0, 0)
-        })
+        captureDock.addView(galleryButton, LinearLayout.LayoutParams(dp(60), dp(60)))
 
         val shutter = FrameLayout(this)
         shutter.addView(View(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0x661E093D)
-                setStroke(dp(5), 0xFFBD58FF.toInt())
+                setColor(0x99210833.toInt())
+                setStroke(dp(5), 0xFFB44AFF.toInt())
             }
-            elevation = dp(5).toFloat()
-        }, FrameLayout.LayoutParams(dp(82), dp(82), Gravity.CENTER))
+            elevation = dp(3).toFloat()
+        }, FrameLayout.LayoutParams(dp(88), dp(88), Gravity.CENTER))
         shutterButton = Button(this).apply {
             text = ""
             contentDescription = "Fotografar"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xFFF8F3FA.toInt())
+                setColor(0xFFF9F7FB.toInt())
+                setStroke(dp(1), 0xFFDED5E6.toInt())
             }
-            elevation = dp(9).toFloat()
+            elevation = dp(5).toFloat()
             setOnClickListener {
                 if (mode == Mode.FOTO || mode == Mode.PRO) takePhoto()
                 else toast("Este modo ainda está em desenvolvimento.")
             }
         }
-        shutter.addView(shutterButton, FrameLayout.LayoutParams(dp(66), dp(66), Gravity.CENTER))
-        captureDock.addView(shutter, LinearLayout.LayoutParams(0, dp(89), 1f))
+        shutter.addView(shutterButton, FrameLayout.LayoutParams(dp(68), dp(68), Gravity.CENTER))
+        captureDock.addView(shutter, LinearLayout.LayoutParams(0, dp(96), 1f))
 
-        captureDock.addView(neonButton("▣", "Alternar para modo vídeo").apply {
-            textSize = 24f
-            setOnClickListener {
-                setMode(Mode.VIDEO)
-                toast("Captura de vídeo ainda não foi implementada.")
-            }
-        }, LinearLayout.LayoutParams(dp(43), dp(50)).apply {
-            setMargins(0, 0, dp(6), 0)
-        })
-        captureDock.addView(neonButton("↻", "Alternar câmera").apply {
+        captureDock.addView(neonButton("↻", "Alternar câmera frontal e traseira").apply {
             textSize = 26f
             setOnClickListener {
                 lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
@@ -524,7 +585,15 @@ class MainActivity : ComponentActivity() {
                 zoomRatio = 1f
                 startCamera()
             }
-        }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        }, LinearLayout.LayoutParams(dp(53), dp(53)).apply {
+            setMargins(0, 0, dp(7), 0)
+        })
+        nightCaptureButton = neonButton("☾\nNoite", "Ativar modo noturno").apply {
+            textSize = 11f
+            setSingleLine(false)
+            setOnClickListener { toggleNight() }
+        }
+        captureDock.addView(nightCaptureButton, LinearLayout.LayoutParams(dp(66), dp(61)))
         lower.addView(captureDock)
 
         // Collapsible row of image-led film presets: completely absent from
@@ -542,18 +611,19 @@ class MainActivity : ComponentActivity() {
         })
 
         val navRow = LinearLayout(this).apply {
+            contentDescription = "Navegação de modos"
             gravity = Gravity.CENTER
-            background = neonPanel(0xF50F0A18.toInt(), 22, 0xFF503260.toInt())
-            setPadding(dp(3), dp(4), dp(3), dp(4))
+            background = neonPanel(0xF40E0A17.toInt(), 19, 0xFF4F3061.toInt())
+            setPadding(dp(4), dp(3), dp(4), dp(3))
         }
         modeStrip = navRow
-        // Icons and labels in the spirit of the reference, with Panorama kept accessible.
         val nav = listOf(
-            Triple("◉\nRetrô", "RETRO", "Escolher câmera analógica"),
-            Triple("▷\nVídeo", "VIDEO", "Modo vídeo"),
             Triple("▣\nFoto", "FOTO", "Modo fotografia"),
-            Triple("☷\nPro", "PRO", "Modo profissional"),
-            Triple("☾\nNoite", "NIGHT", "Modo noturno"),
+            Triple("▷\nVídeo", "VIDEO", "Modo vídeo"),
+            Triple("♙\nRetrato", "PORTRAIT", "Modo retrato"),
+            Triple("☾\nNoturno", "NIGHT", "Modo noturno"),
+            Triple("△\nPro", "PRO", "Modo profissional"),
+            Triple("▣\nRetrô", "RETRO", "Escolher filme analógico"),
             Triple("▱\nPano", "PANO", "Modo panorama")
         )
         nav.forEach { item ->
@@ -565,33 +635,41 @@ class MainActivity : ComponentActivity() {
                     "PANO" -> Mode.PANORAMA
                     else -> item.second
                 }
-                textSize = if (landscape) 9f else 10f
+                textSize = 10f
                 setSingleLine(false)
+                gravity = Gravity.CENTER
                 setOnClickListener {
                     when (item.second) {
                         "RETRO" -> {
                             if (nightMode) toggleNight()
                             setMode(Mode.FOTO)
-                            showFilmPicker()
+                            setFilterDrawerOpen(true)
                         }
                         "VIDEO" -> { if (nightMode) toggleNight(); setMode(Mode.VIDEO) }
+                        "PORTRAIT" -> toast("Retrato com desfoque óptico está em desenvolvimento.")
                         "FOTO" -> { if (nightMode) toggleNight(); setMode(Mode.FOTO) }
                         "PRO" -> {
                             if (nightMode) toggleNight()
                             setMode(Mode.PRO)
                             showProSheet()
                         }
-                        "NIGHT" -> { toggleNight(); updateNavState() }
+                        "NIGHT" -> toggleNight()
                         "PANO" -> { if (nightMode) toggleNight(); setMode(Mode.PANORAMA) }
                     }
                 }
             }
             if (item.second == "NIGHT") nightButton = button
-            navRow.addView(button, LinearLayout.LayoutParams(0, dp(64), 1f).apply {
+            navRow.addView(button, LinearLayout.LayoutParams(dp(62), dp(57)).apply {
                 setMargins(dp(1), 0, dp(1), 0)
             })
         }
-        lower.addView(navRow)
+        val navScroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(navRow)
+        }
+        lower.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)))
+
         saveLabel = text("LOCAL • OFFLINE", 9f, 0xFFB4A7BE.toInt()).apply {
             gravity = Gravity.CENTER
             setSingleLine()
@@ -599,34 +677,91 @@ class MainActivity : ComponentActivity() {
         }
         lower.addView(saveLabel)
 
+        // Reorder panels exactly as in the reference:
+        // viewfinder → mode bar → shutter → filter drawer.
+        // Only the filter drawer expands; other actions remain accessible.
+        lower.removeView(captureDock)
+        lower.removeView(navScroller)
+        lower.removeView(saveLabel)
+        lower.removeView(quickEdits)
+        lower.removeView(filmChooserButton)
+        lower.removeView(filterDrawer)
+        lower.removeAllViews()
+        creativeRow = quickEdits
+        creativeRow.visibility = View.GONE
+        filmChooserButton.background = neonPanel(
+            0xF0181223.toInt(), 17, 0xFF624075.toInt()
+        )
+        filmChooserButton.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        filmChooserButton.setPadding(dp(14), 0, dp(14), 0)
+        filmChooserButton.textSize = 12f
+        filmChooserButton.setSingleLine(true)
+        filmChooserButton.ellipsize = android.text.TextUtils.TruncateAt.END
+        lower.setPadding(dp(7), dp(5), dp(7), dp(7))
+        lower.background = neonPanel(0xF0120B1D.toInt(), 20, 0xFF3A2250.toInt())
+        lower.addView(filmChooserButton, LinearLayout.LayoutParams(-1, dp(44)))
+        lower.addView(filterDrawer, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(0, dp(3), 0, dp(3))
+        })
+        lower.addView(creativeRow, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            setMargins(0, dp(3), 0, 0)
+        })
+
         if (landscape) {
-            // Controls in a right-hand rail; live view remains the full left pane.
+            // Landscape has a large left viewport and fixed right-side controls.
+            root.addView(viewfinderFrame, FrameLayout.LayoutParams(-1, -1).apply {
+                setMargins(dp(4), dp(4), dp(326), dp(4))
+            })
             val rail = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                background = neonPanel(0xEB0C0913.toInt(), 22, 0xB244285C.toInt())
+                background = neonPanel(0xF00E0917.toInt(), 18, 0xFF4F3262.toInt())
             }
-            rail.addView(chromeRoot)
-            // Pin shutter + mode bar: only secondary film tools scroll in landscape.
-            lower.removeView(captureDock)
-            lower.removeView(navRow)
-            lower.removeView(saveLabel)
+            val scrollArea = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+            }
+            scrollArea.addView(chromeRoot)
+            scrollArea.addView(lower)
             val scroll = ScrollView(this).apply {
                 isVerticalScrollBarEnabled = false
                 isFillViewport = false
+                addView(scrollArea)
             }
-            scroll.addView(lower)
             rail.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-            rail.addView(captureDock)
-            rail.addView(navRow)
+            rail.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)))
+            rail.addView(captureDock, LinearLayout.LayoutParams(-1, dp(96)))
             root.addView(rail, FrameLayout.LayoutParams(dp(320), -1, Gravity.RIGHT).apply {
-                setMargins(0, dp(3), dp(5), dp(3))
+                setMargins(0, dp(3), dp(4), dp(3))
             })
         } else {
-            root.addView(chromeRoot, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply {
-                setMargins(dp(6), dp(4), dp(6), 0)
+            val stack = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundColor(0xFF08050D.toInt())
+            }
+            root.addView(stack, FrameLayout.LayoutParams(-1, -1))
+            stack.addView(chromeRoot, LinearLayout.LayoutParams(-1, -2))
+            stack.addView(viewfinderFrame, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+                setMargins(dp(7), dp(4), dp(7), dp(4))
             })
-            root.addView(lower, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM))
+            stack.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)).apply {
+                setMargins(dp(8), 0, dp(8), dp(2))
+            })
+            stack.addView(captureDock, LinearLayout.LayoutParams(-1, dp(96)).apply {
+                setMargins(dp(7), 0, dp(7), dp(1))
+            })
+            stack.addView(lower, LinearLayout.LayoutParams(-1, -2).apply {
+                setMargins(dp(6), 0, dp(6), dp(3))
+            })
         }
+        // This status is overlaid within the camera rather than taking a
+        // separate permanent row below the shutter.
+        // Capture progress can reappear on demand, but does not cover composition.
+        saveLabel.visibility = View.GONE
+        viewfinderFrame.addView(saveLabel, FrameLayout.LayoutParams(-2, -2,
+            Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(67) })
+        // Hide the general help label after initial mode selection.
+        hintLabel.postDelayed({
+            if (!isFinishing && !isDestroyed) hintLabel.visibility = View.GONE
+        }, 1800L)
         updateFilm()
         setMode(mode)
         refreshGalleryThumbnail()
@@ -670,14 +805,28 @@ class MainActivity : ComponentActivity() {
         previewRetries = 0
         filterDrawer.visibility = if (open) View.VISIBLE else View.GONE
         filterDrawer.setSelected(selectedPreset)
-        filtersQuickButton.background = neonPanel(
-            if (open) 0xFF5F1A9C.toInt() else 0x00101015,
-            14,
-            if (open) 0xFFCB83FA.toInt() else Color.TRANSPARENT
+        filmChooserButton.background = neonPanel(
+            if (open) 0xFF2F133F.toInt() else 0xF0181223.toInt(),
+            17,
+            if (open) 0xFFB262EF.toInt() else 0xFF624075.toInt()
         )
+        if (::zoomStrip.isInitialized) {
+            if (open) zoomStrip.visibility = View.GONE
+            else rebuildZoomControls()
+        }
+        if (::exposureDisplay.isInitialized) {
+            exposureDisplay.visibility = if (open) View.GONE else View.VISIBLE
+        }
+        if (::hintLabel.isInitialized) hintLabel.visibility = View.GONE
+        if (::saveLabel.isInitialized) saveLabel.visibility = View.GONE
         filmChooserButton.text = if (open)
-            "⌃  FILTROS & EFEITOS  •  " + FilmCatalog.presets[selectedPreset].name
-        else "▣  " + FilmCatalog.presets[selectedPreset].name + "   ⌄"
+            "◉  Filtros & Efeitos   •   " + FilmCatalog.presets[selectedPreset].name + "   ⌃"
+        else "◉  Filtros & Efeitos   ⌄"
+        if (::creativeRow.isInitialized) {
+            val compact = resources.displayMetrics.heightPixels /
+                resources.displayMetrics.density < 750f
+            creativeRow.visibility = if (open && !compact) View.VISIBLE else View.GONE
+        }
         if (open) {
             filterDrawer.clearPreviews()
             requestFilmPreviews()
@@ -788,6 +937,33 @@ class MainActivity : ComponentActivity() {
             })
         }
         zoomStrip.visibility = if (maxZoom - minZoom < .1f) View.GONE else View.VISIBLE
+        if (::zoomQuickStrip.isInitialized) {
+            zoomQuickStrip.removeAllViews()
+            val currentOptions = options
+            currentOptions.forEach { ratio ->
+                val chosen = kotlin.math.abs(ratio - zoomRatio) < .04f
+                zoomQuickStrip.addView(neonButton(
+                    if (ratio % 1f == 0f) ratio.toInt().toString() + "×" else "0,5×",
+                    "Zoom " + ratio + " vezes"
+                ).apply {
+                    textSize = 11f
+                    background = neonPanel(
+                        if (chosen) 0xFF7D12D1.toInt() else 0x8B100C18.toInt(),
+                        18,
+                        if (chosen) 0xFFCF82FF.toInt() else Color.TRANSPARENT
+                    )
+                    setOnClickListener {
+                        activeCamera?.cameraControl?.setZoomRatio(ratio)
+                        zoomRatio = ratio
+                        rebuildZoomControls()
+                    }
+                }, LinearLayout.LayoutParams(dp(47), dp(30)).apply {
+                    setMargins(dp(2), 0, dp(2), 0)
+                })
+            }
+            zoomQuickStrip.visibility = if (currentOptions.size > 1)
+                View.VISIBLE else View.GONE
+        }
     }
 
     private fun updateNavState() {
@@ -853,7 +1029,15 @@ class MainActivity : ComponentActivity() {
 
     private fun updateNightButton() {
         if (!::nightButton.isInitialized) return
-        nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoite"
+        nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoturno"
+        if (::nightCaptureButton.isInitialized) {
+            nightCaptureButton.text = if (nightMode) "☾\nAtivo" else "☾\nNoite"
+            nightCaptureButton.background = neonPanel(
+                if (nightMode) 0xFF7414B9.toInt() else 0xFF26192F.toInt(),
+                16,
+                if (nightMode) 0xFFC97AFF.toInt() else 0xFF6A4A81.toInt()
+            )
+        }
         updateNavState()
     }
 
@@ -879,7 +1063,7 @@ class MainActivity : ComponentActivity() {
         val surface = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(20), dp(24))
-            background = rounded(0xFF202126.toInt(), 24, 0xFF4D4C51.toInt())
+            background = neonPanel(0xF4150D21.toInt(), 24, 0xFF7B4B99.toInt())
         }
         val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         heading.addView(text(title, 17f, Color.WHITE, Typeface.BOLD).apply {
@@ -969,12 +1153,15 @@ class MainActivity : ComponentActivity() {
             Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
             Flash.ON -> ImageCapture.FLASH_MODE_ON
         }
-        flashButton.text = when {
-            nightMode -> "⚡ NOITE"
-            !available -> "⚡ N/A"
-            setting == Flash.AUTO -> "⚡ AUTO"
-            setting == Flash.ON -> "⚡ ON"
-            else -> "⚡ OFF"
+        flashButton.text = "ϟ"
+        if (::flashStatusLabel.isInitialized) {
+            flashStatusLabel.text = when {
+                nightMode -> "Noite"
+                !available -> "Flash —"
+                setting == Flash.AUTO -> "Auto"
+                setting == Flash.ON -> "Ligado"
+                else -> "Flash"
+            }
         }
     }
 
@@ -1395,8 +1582,8 @@ class MainActivity : ComponentActivity() {
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
         if (::filmChooserButton.isInitialized) {
             filmChooserButton.text = if (filterDrawerOpen)
-                "⌃  FILTROS & EFEITOS  •  " + preset.name
-            else "▣  " + preset.name + "   ⌄"
+                "◉  Filtros & Efeitos   •   " + preset.name + "   ⌃"
+            else "◉  Filtros & Efeitos   ⌄"
         }
         if (::filterDrawer.isInitialized) filterDrawer.setSelected(selectedPreset, false)
         frameGuide.warmTint = preset.red >= preset.blue
@@ -1613,6 +1800,7 @@ class MainActivity : ComponentActivity() {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
+        saveLabel.visibility = View.VISIBLE
         saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
         val capturedGrade = if (nightMode && !nightUsingOem) {
             // Subtle low-light shadow boost after actual frame fusion.
@@ -1798,6 +1986,11 @@ class MainActivity : ComponentActivity() {
         saving = false
         shutterButton.isEnabled = mode == Mode.FOTO || mode == Mode.PRO
         saveLabel.text = message
+        saveLabel.visibility = View.VISIBLE
+        handler.postDelayed({
+            if (!isFinishing && !isDestroyed && !saving && saveLabel.text == message)
+                saveLabel.visibility = View.GONE
+        }, 2300L)
     }
 
     private fun text(value: String, sizeSp: Float, color: Int, weight: Int = Typeface.NORMAL) =
