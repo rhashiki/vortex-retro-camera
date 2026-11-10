@@ -345,7 +345,6 @@ class MainActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(0, dp(41), 1f).apply {
             setMargins(dp(2), 0, dp(2), 0)
         })
-        )
         chromeRoot.addView(featureRail)
 
         val indicators = LinearLayout(this).apply {
