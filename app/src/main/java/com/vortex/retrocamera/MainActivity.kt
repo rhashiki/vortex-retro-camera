@@ -363,7 +363,14 @@ class MainActivity : ComponentActivity() {
         }
         indicators.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         indicators.addView(histogramView, LinearLayout.LayoutParams(dp(111), dp(61)))
-        chromeRoot.addView(indicators)
+        if (landscape) {
+            viewfinderFrame.addView(indicators,
+                FrameLayout.LayoutParams(dp(250), dp(70), Gravity.TOP or Gravity.LEFT).apply {
+                    setMargins(dp(7), dp(9), 0, 0)
+                })
+        } else {
+            chromeRoot.addView(indicators)
+        }
 
         filmLabel = text(FilmCatalog.presets[selectedPreset].name, 12f, Color.WHITE, Typeface.BOLD)
         filmTagline = text(FilmCatalog.presets[selectedPreset].tagline, 9f, 0xFFD4B7F1.toInt())
@@ -564,12 +571,18 @@ class MainActivity : ComponentActivity() {
                 background = neonPanel(0xEB0C0913.toInt(), 22, 0xB244285C.toInt())
             }
             rail.addView(chromeRoot)
+            // Pin shutter + mode bar: only secondary film tools scroll in landscape.
+            lower.removeView(captureDock)
+            lower.removeView(navRow)
+            lower.removeView(saveLabel)
             val scroll = ScrollView(this).apply {
                 isVerticalScrollBarEnabled = false
                 isFillViewport = false
             }
             scroll.addView(lower)
             rail.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+            rail.addView(captureDock)
+            rail.addView(navRow)
             root.addView(rail, FrameLayout.LayoutParams(dp(285), -1, Gravity.RIGHT).apply {
                 setMargins(0, dp(3), dp(5), dp(3))
             })
