@@ -42,6 +42,8 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.AspectRatio
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.Preview
 import androidx.camera.extensions.ExtensionMode
@@ -565,7 +567,7 @@ class MainActivity : ComponentActivity() {
             rail.addView(chromeRoot)
             val scroll = ScrollView(this).apply {
                 isVerticalScrollBarEnabled = false
-                fillViewport = false
+                isFillViewport = false
             }
             scroll.addView(lower)
             rail.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -722,13 +724,8 @@ class MainActivity : ComponentActivity() {
 
     private fun updateNightButton() {
         if (!::nightButton.isInitialized) return
-        nightButton.text = if (nightMode) "☾ ON" else "☾ NOITE"
-        nightButton.setTextColor(if (nightMode) 0xFF111217.toInt() else 0xFFF4E7D6.toInt())
-        nightButton.background = chromePanel(
-            if (nightMode) 0xFFE9C38F.toInt() else 0xFF2A2B31.toInt(),
-            13,
-            if (nightMode) 0xFFFFE8BE.toInt() else 0xFF53515B.toInt()
-        )
+        nightButton.text = if (nightMode) "☾\\nAtiva" else "☾\\nNoite"
+        updateNavState()
     }
 
     private fun rounded(color: Int, radius: Int, border: Int = color): GradientDrawable =
@@ -1151,6 +1148,7 @@ class MainActivity : ComponentActivity() {
             Mode.VIDEO -> "VÍDEO RETRÔ · em desenvolvimento (M5)"
         }
         shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
+        updateNavState()
         if (mode == Mode.PRO) applyManual() else {
             if (manualFocus) manual?.clearExposure() else manual?.reset()
         }
@@ -1261,6 +1259,7 @@ class MainActivity : ComponentActivity() {
         val preset = FilmCatalog.presets[selectedPreset]
         filmLabel.text = preset.name
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
+        if (::filmChooserButton.isInitialized) filmChooserButton.text = "▣  " + preset.name + "   ›"
         frameGuide.warmTint = preset.red >= preset.blue
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
         val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
@@ -1628,6 +1627,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        histogramExecutor.shutdown()
         shutterSound.release()
         io.shutdown()
         super.onDestroy()
