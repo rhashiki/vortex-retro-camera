@@ -323,10 +323,12 @@ class MainActivity : ComponentActivity() {
 
         val titleRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(11), dp(7), dp(8), dp(7))
+            setPadding(dp(10), dp(3), dp(8), dp(3))
         }
-        titleRow.addView(text("◉", 29f, 0xFFB654FF.toInt(), Typeface.BOLD),
-            LinearLayout.LayoutParams(dp(38), dp(42)))
+        titleRow.addView(VortexApertureMark(this),
+            LinearLayout.LayoutParams(dp(36), dp(36)).apply {
+                setMargins(0, 0, dp(3), 0)
+            })
         titleRow.addView(text("Vortex Camera", if (landscape) 14f else 17f,
             Color.WHITE, Typeface.BOLD).apply {
             setSingleLine()
@@ -358,7 +360,7 @@ class MainActivity : ComponentActivity() {
         // reference. Scrolls only on narrow phones instead of compressing text.
         val featureRail = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(5), dp(5), dp(5), dp(5))
+            setPadding(dp(5), dp(2), dp(5), dp(2))
         }
         val featureScroller = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -383,13 +385,13 @@ class MainActivity : ComponentActivity() {
                 }
                 setOnClickListener { action() }
             }
-            item.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
+            item.addView(icon, LinearLayout.LayoutParams(dp(34), dp(34)))
             val label = text(caption, 9f, 0xFFF0E7F5.toInt()).apply {
                 gravity = Gravity.CENTER
                 setSingleLine()
             }
-            item.addView(label, LinearLayout.LayoutParams(-1, dp(22)))
-            featureRail.addView(item, LinearLayout.LayoutParams(dp(54), dp(71)))
+            item.addView(label, LinearLayout.LayoutParams(-1, dp(17)))
+            featureRail.addView(item, LinearLayout.LayoutParams(dp(51), dp(56)))
             if (caption == "Flash") flashStatusLabel = label
             return icon
         }
@@ -412,7 +414,7 @@ class MainActivity : ComponentActivity() {
         })
         addFeature("⚙", "Config.", "Configurações", { showOptionsSheet() })
         featureScroller.addView(featureRail)
-        chromeRoot.addView(featureScroller, LinearLayout.LayoutParams(-1, dp(82)).apply {
+        chromeRoot.addView(featureScroller, LinearLayout.LayoutParams(-1, dp(64)).apply {
             setMargins(dp(6), 0, dp(6), dp(4))
         })
 
@@ -500,9 +502,13 @@ class MainActivity : ComponentActivity() {
             return action
         }
         addTool("≡ Ajustes", { showGradeSheet() }, 1.1f)
-        filtersQuickButton = addTool("◉ Filtros", { showFilmPicker() }, 1f)
-        addTool("✦ Efeitos", { showFilmSheet() }, 1f)
-        addTool("▦ Grão", { showFilmSheet() }, .9f)
+        filtersQuickButton = addTool("✦ Efeitos", { showFilmSheet() }, 1f)
+        addTool("▦ Grão", { showFilmSheet() }, 1f)
+        addTool("◖ Queima", { showFilmSheet() }, .95f)
+        addTool("▤ Data", {
+            dateStamp = !dateStamp
+            toast(if (dateStamp) "Carimbo de data ativado" else "Carimbo de data desativado")
+        }, .8f)
         lower.addView(quickEdits)
         filmChooserButton = neonButton("▣ Vintage 200  ›", "Selecionar película fotográfica").apply {
             textSize = 11f
@@ -744,8 +750,14 @@ class MainActivity : ComponentActivity() {
         }
         // This status is overlaid within the camera rather than taking a
         // separate permanent row below the shutter.
+        // Capture progress can reappear on demand, but does not cover composition.
+        saveLabel.visibility = View.GONE
         viewfinderFrame.addView(saveLabel, FrameLayout.LayoutParams(-2, -2,
             Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dp(67) })
+        // Hide the general help label after initial mode selection.
+        hintLabel.postDelayed({
+            if (!isFinishing && !isDestroyed) hintLabel.visibility = View.GONE
+        }, 1800L)
         updateFilm()
         setMode(mode)
         refreshGalleryThumbnail()
