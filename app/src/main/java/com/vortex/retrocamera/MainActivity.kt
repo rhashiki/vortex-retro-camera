@@ -206,6 +206,18 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(0xFF08060E.toInt())
         }
         setContentView(root)
+        // These controls are used by setMode() during initial construction,
+        // before any camera permissions or CameraX provider are available.
+        // Keeping them initialized prevents an UninitializedPropertyAccessException
+        // on the very first app launch.
+        proPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        buildProPanel()
+        focusControlButton = neonButton("◎ FOCO", "Foco automático e manual").apply {
+            setOnClickListener { showFocusSheet() }
+        }
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -942,6 +954,11 @@ class MainActivity : ComponentActivity() {
 
     private fun showOptionsSheet() {
         showSheet("Ajustes da câmera") { content ->
+            rowAction(content, "Foco automático e manual",
+                "Toque para focar ou controle a distância óptica") {
+                showFocusSheet()
+            }.text = "ABRIR"
+
             rowAction(content, "Textura da película", "Granulação e queima de filme") {
                 showFilmSheet()
             }.text = "ABRIR"
