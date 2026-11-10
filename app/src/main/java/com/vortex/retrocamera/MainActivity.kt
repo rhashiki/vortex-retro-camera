@@ -237,6 +237,7 @@ class MainActivity : ComponentActivity() {
         ViewCompat.requestApplyInsets(root)
 
         viewfinderFrame = FrameLayout(this).apply {
+            contentDescription = "Visor da câmera"
             setBackgroundColor(Color.BLACK)
             background = rounded(0xFF101016.toInt(), 18, 0xFF593471.toInt())
             clipToOutline = true
@@ -514,6 +515,7 @@ class MainActivity : ComponentActivity() {
         })
 
         val captureDock = LinearLayout(this).apply {
+            contentDescription = "Área de disparo"
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(9), dp(2), dp(9), dp(2))
             background = neonPanel(0xDE090611.toInt(), 16, 0xFF291934.toInt())
@@ -599,6 +601,7 @@ class MainActivity : ComponentActivity() {
         })
 
         val navRow = LinearLayout(this).apply {
+            contentDescription = "Navegação de modos"
             gravity = Gravity.CENTER
             background = neonPanel(0xF40E0A17.toInt(), 19, 0xFF4F3061.toInt())
             setPadding(dp(4), dp(3), dp(4), dp(3))
