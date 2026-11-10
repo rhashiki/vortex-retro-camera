@@ -32,4 +32,17 @@ jobs:
           arch: x86_64
           profile: pixel_4
           disable-animations: true
-          script: gradle --no-daemon :app:connectedDebugAndroidTest
+          script: |
+            gradle --no-daemon :app:connectedDebugAndroidTest
+            adb shell pm grant com.vortex.retrocamera android.permission.CAMERA || true
+            adb shell am start -n com.vortex.retrocamera/.MainActivity
+            sleep 4
+            adb shell screencap -p /sdcard/vortex-premium-layout.png
+            adb pull /sdcard/vortex-premium-layout.png vortex-premium-layout.png
+      - name: Upload camera layout screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vortex-premium-ui-screenshot
+          path: vortex-premium-layout.png
+          if-no-files-found: ignore
