@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Slider
@@ -129,6 +130,7 @@ fun VortexCameraScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
         val landscape = maxWidth > maxHeight
         val compact = maxHeight < 730.dp
+        val screenHeight = maxHeight
         val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
@@ -220,7 +222,7 @@ fun VortexCameraScreen(
                     enter = fadeIn() + expandVertically(),
                     exit = fadeOut() + shrinkVertically()
                 ) {
-                    val maxPanel = if (compact) maxHeight * .34f else maxHeight * .49f
+                    val maxPanel = if (compact) screenHeight * .34f else screenHeight * .49f
                     PanelSurface(Modifier.fillMaxWidth().heightIn(max = maxPanel)) {
                         Column(Modifier.verticalScroll(rememberScrollState())) {
                             if (panel != null) PanelContents(panel!!, snapshot, actions) {
