@@ -455,6 +455,10 @@ class MainActivity : ComponentActivity() {
             FrameLayout.LayoutParams(-2, dp(36), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = dp(10)
             })
+        viewfinderFrame.addView(CameraLevelView(this),
+            FrameLayout.LayoutParams(dp(65), dp(65), Gravity.BOTTOM or Gravity.LEFT).apply {
+                setMargins(dp(12), 0, 0, dp(12))
+            })
 
         filmLabel = text(FilmCatalog.presets[selectedPreset].name, 12f, Color.WHITE, Typeface.BOLD)
         filmTagline = text(FilmCatalog.presets[selectedPreset].tagline, 9f, 0xFFD4B7F1.toInt())
@@ -1796,6 +1800,7 @@ class MainActivity : ComponentActivity() {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
+        saveLabel.visibility = View.VISIBLE
         saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
         val capturedGrade = if (nightMode && !nightUsingOem) {
             // Subtle low-light shadow boost after actual frame fusion.
