@@ -987,6 +987,8 @@ class MainActivity : ComponentActivity() {
         filmChooserButton.text = if (open)
             "◉  Filtros & Efeitos   •   " + FilmCatalog.presets[selectedPreset].name + "   ⌃"
         else "◉  Filtros & Efeitos   ⌄"
+        if (!open && composeInstalled)
+            composeState.value = composeState.value.copy(filmPreviews = emptyMap())
         if (::creativeRow.isInitialized) {
             val compact = resources.displayMetrics.heightPixels /
                 resources.displayMetrics.density < 750f
@@ -1057,6 +1059,11 @@ class MainActivity : ComponentActivity() {
                         if (generation == filterPreviewGeneration && filterDrawerOpen &&
                             !isDestroyed && !isFinishing) {
                             filterDrawer.showPreview(i, rendered)
+                            if (composeInstalled) {
+                                composeState.value = composeState.value.copy(
+                                    filmPreviews = composeState.value.filmPreviews + (i to rendered)
+                                )
+                            }
                             if (i == FilmCatalog.presets.lastIndex)
                                 filterDrawer.showPreviewReady()
                         } else {
@@ -1102,6 +1109,7 @@ class MainActivity : ComponentActivity() {
             })
         }
         zoomStrip.visibility = if (maxZoom - minZoom < .1f) View.GONE else View.VISIBLE
+        if (composeInstalled) syncCompose()
         if (::zoomQuickStrip.isInitialized) {
             zoomQuickStrip.removeAllViews()
             val currentOptions = options
@@ -1193,6 +1201,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateNightButton() {
+        if (composeInstalled) syncCompose()
         if (!::nightButton.isInitialized) return
         nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoturno"
         if (::nightCaptureButton.isInitialized) {
@@ -1318,6 +1327,7 @@ class MainActivity : ComponentActivity() {
             Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
             Flash.ON -> ImageCapture.FLASH_MODE_ON
         }
+        if (composeInstalled) syncCompose()
         flashButton.text = "ϟ"
         if (::flashStatusLabel.isInitialized) {
             flashStatusLabel.text = when {
@@ -1638,6 +1648,7 @@ class MainActivity : ComponentActivity() {
         if (mode == Mode.PRO) applyManual() else {
             if (manualFocus) manual?.clearExposure() else manual?.reset()
         }
+        if (composeInstalled) syncCompose()
     }
 
     private fun buildProPanel() {
@@ -1783,6 +1794,7 @@ class MainActivity : ComponentActivity() {
             if (preset.red > preset.blue) 0xFFCF8B57.toInt() else 0xFF459F96.toInt()
         )
         previewTint.alpha = 0.035f
+        if (composeInstalled) syncCompose()
     }
 
     private fun startCamera() {
@@ -1860,6 +1872,38 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     histogramView.submit(buckets)
+                    // Sample genuine RGB histograms at ~5 Hz. CameraX YUV_420_888
+                    // planes are read sparsely off the UI thread, never fabricated.
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (composeInstalled && now - lastRgbFrameMs >= 210L &&
+                        image.planes.size >= 3) {
+                        lastRgbFrameMs = now
+                        val us = image.planes[1]; val vs = image.planes[2]
+                        val ub = us.buffer; val vb = vs.buffer
+                        val reds = IntArray(32); val greens = IntArray(32); val blues = IntArray(32)
+                        for (y in 0 until image.height step stepY) {
+                            for (x in 0 until image.width step stepX) {
+                                val yi = y * plane.rowStride + x * plane.pixelStride
+                                val ui = y / 2 * us.rowStride + x / 2 * us.pixelStride
+                                val vi = y / 2 * vs.rowStride + x / 2 * vs.pixelStride
+                                if (yi >= yBuffer.limit() || ui >= ub.limit() || vi >= vb.limit()) continue
+                                val yy = (yBuffer.get(yi).toInt() and 255).toFloat()
+                                val u = (ub.get(ui).toInt() and 255) - 128
+                                val v = (vb.get(vi).toInt() and 255) - 128
+                                val red = (yy + 1.402f * v).toInt().coerceIn(0, 255)
+                                val green = (yy - .344f * u - .714f * v).toInt().coerceIn(0, 255)
+                                val blue = (yy + 1.772f * u).toInt().coerceIn(0, 255)
+                                reds[red / 8]++
+                                greens[green / 8]++
+                                blues[blue / 8]++
+                            }
+                        }
+                        val frame = HistogramRgb(reds.toList(), greens.toList(), blues.toList())
+                        runOnUiThread {
+                            if (composeInstalled && !isDestroyed && !isFinishing)
+                                composeState.value = composeState.value.copy(histogram = frame)
+                        }
+                    }
                 } finally {
                     image.close()
                 }
@@ -1916,6 +1960,7 @@ class MainActivity : ComponentActivity() {
             }
             shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
             updateFlash()
+            if (composeInstalled) syncCompose()
         } catch (e: Exception) {
             if (useOemNight) {
                 // A device may advertise the extension but still reject binding.
@@ -1965,6 +2010,7 @@ class MainActivity : ComponentActivity() {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
+        if (composeInstalled) syncCompose()
         saveLabel.visibility = View.VISIBLE
         saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
         val capturedGrade = if (nightMode && !nightUsingOem) {
@@ -2123,6 +2169,7 @@ class MainActivity : ComponentActivity() {
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
         finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
         refreshGalleryThumbnail(uri)
+        if (composeInstalled) syncCompose()
     }
 
     private fun refreshGalleryThumbnail(photoUri: Uri? = null) {
@@ -2151,6 +2198,7 @@ class MainActivity : ComponentActivity() {
         saving = false
         shutterButton.isEnabled = mode == Mode.FOTO || mode == Mode.PRO
         saveLabel.text = message
+        if (composeInstalled) syncCompose()
         saveLabel.visibility = View.VISIBLE
         handler.postDelayed({
             if (!isFinishing && !isDestroyed && !saving && saveLabel.text == message)
