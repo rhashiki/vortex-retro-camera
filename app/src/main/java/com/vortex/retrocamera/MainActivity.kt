@@ -1986,6 +1986,11 @@ class MainActivity : ComponentActivity() {
         saving = false
         shutterButton.isEnabled = mode == Mode.FOTO || mode == Mode.PRO
         saveLabel.text = message
+        saveLabel.visibility = View.VISIBLE
+        handler.postDelayed({
+            if (!isFinishing && !isDestroyed && !saving && saveLabel.text == message)
+                saveLabel.visibility = View.GONE
+        }, 2300L)
     }
 
     private fun text(value: String, sizeSp: Float, color: Int, weight: Int = Typeface.NORMAL) =
