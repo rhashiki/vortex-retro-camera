@@ -165,7 +165,7 @@ class FilmFilterDrawer(
     }
 
     fun showPreviewReady() {
-        subtitle.text = "Prévias com as cores reais de cada película"
+        subtitle.text = "Prévia aproximada de cada película"
     }
 
     fun clearPreviews() {
