@@ -392,7 +392,7 @@ class MainActivity : ComponentActivity() {
             if (caption == "Flash") flashStatusLabel = label
             return icon
         }
-        flashButton = addFeature("ϟ", "Flash", "Modo do flash") { cycleFlash() }
+        flashButton = addFeature("ϟ", "Flash", "Modo do flash", { cycleFlash() })
         addFeature("HDR", "HDR", "HDR em desenvolvimento", {
             toast("HDR inteligente ainda não está disponível.")
         }, highlight = false)
@@ -792,8 +792,13 @@ class MainActivity : ComponentActivity() {
             if (open) 0xFFCB83FA.toInt() else Color.TRANSPARENT
         )
         filmChooserButton.text = if (open)
-            "⌃  FILTROS & EFEITOS  •  " + FilmCatalog.presets[selectedPreset].name
-        else "▣  " + FilmCatalog.presets[selectedPreset].name + "   ⌄"
+            "◉  Filtros & Efeitos   •   " + FilmCatalog.presets[selectedPreset].name + "   ⌃"
+        else "◉  Filtros & Efeitos   ⌄"
+        if (::creativeRow.isInitialized) {
+            val compact = resources.displayMetrics.heightPixels /
+                resources.displayMetrics.density < 750f
+            creativeRow.visibility = if (open && !compact) View.VISIBLE else View.GONE
+        }
         if (open) {
             filterDrawer.clearPreviews()
             requestFilmPreviews()
@@ -969,7 +974,15 @@ class MainActivity : ComponentActivity() {
 
     private fun updateNightButton() {
         if (!::nightButton.isInitialized) return
-        nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoite"
+        nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoturno"
+        if (::nightCaptureButton.isInitialized) {
+            nightCaptureButton.text = if (nightMode) "☾\nAtivo" else "☾\nNoite"
+            nightCaptureButton.background = neonPanel(
+                if (nightMode) 0xFF7414B9.toInt() else 0xFF26192F.toInt(),
+                16,
+                if (nightMode) 0xFFC97AFF.toInt() else 0xFF6A4A81.toInt()
+            )
+        }
         updateNavState()
     }
 
@@ -995,7 +1008,7 @@ class MainActivity : ComponentActivity() {
         val surface = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(14), dp(20), dp(24))
-            background = rounded(0xFF202126.toInt(), 24, 0xFF4D4C51.toInt())
+            background = neonPanel(0xF4150D21.toInt(), 24, 0xFF7B4B99.toInt())
         }
         val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         heading.addView(text(title, 17f, Color.WHITE, Typeface.BOLD).apply {
@@ -1085,12 +1098,15 @@ class MainActivity : ComponentActivity() {
             Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
             Flash.ON -> ImageCapture.FLASH_MODE_ON
         }
-        flashButton.text = when {
-            nightMode -> "⚡ NOITE"
-            !available -> "⚡ N/A"
-            setting == Flash.AUTO -> "⚡ AUTO"
-            setting == Flash.ON -> "⚡ ON"
-            else -> "⚡ OFF"
+        flashButton.text = "ϟ"
+        if (::flashStatusLabel.isInitialized) {
+            flashStatusLabel.text = when {
+                nightMode -> "Noite"
+                !available -> "Flash —"
+                setting == Flash.AUTO -> "Auto"
+                setting == Flash.ON -> "Ligado"
+                else -> "Flash"
+            }
         }
     }
 
@@ -1511,8 +1527,8 @@ class MainActivity : ComponentActivity() {
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
         if (::filmChooserButton.isInitialized) {
             filmChooserButton.text = if (filterDrawerOpen)
-                "⌃  FILTROS & EFEITOS  •  " + preset.name
-            else "▣  " + preset.name + "   ⌄"
+                "◉  Filtros & Efeitos   •   " + preset.name + "   ⌃"
+            else "◉  Filtros & Efeitos   ⌄"
         }
         if (::filterDrawer.isInitialized) filterDrawer.setSelected(selectedPreset, false)
         frameGuide.warmTint = preset.red >= preset.blue
