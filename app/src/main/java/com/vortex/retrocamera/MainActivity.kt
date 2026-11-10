@@ -723,7 +723,7 @@ class MainActivity : ComponentActivity() {
 
     private fun updateNightButton() {
         if (!::nightButton.isInitialized) return
-        nightButton.text = if (nightMode) "☾\\nAtiva" else "☾\\nNoite"
+        nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoite"
         updateNavState()
     }
 
@@ -1085,11 +1085,11 @@ class MainActivity : ComponentActivity() {
             val chip = premiumControl(abbreviated, preset.tagline, "Película " + preset.name).apply {
                 textSize = 10f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                setTextColor(if (active) 0xFF171414.toInt() else 0xFFE1DBD2.toInt())
-                background = chromePanel(
-                    if (active) 0xFFF1D1A5.toInt() else 0xFF34343C.toInt(),
+                setTextColor(if (active) Color.WHITE else 0xFFE6D9F2.toInt())
+                background = neonPanel(
+                    if (active) 0xFF7321BD.toInt() else 0xFF242032.toInt(),
                     12,
-                    if (active) 0xFFFFEAD0.toInt() else 0xFF53525B.toInt()
+                    if (active) 0xFFCF83FF.toInt() else 0xFF625174.toInt()
                 )
                 setOnClickListener {
                     selectedPreset = index
