@@ -131,6 +131,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var filmScrollView: HorizontalScrollView
     private lateinit var filterDrawer: FilmFilterDrawer
     private lateinit var filtersQuickButton: Button
+    private lateinit var creativeRow: LinearLayout
+    private lateinit var nightCaptureButton: Button
+    private lateinit var flashStatusLabel: TextView
+    private lateinit var zoomQuickStrip: LinearLayout
     @Volatile private var filterDrawerOpen = false
     @Volatile private var filterPreviewGeneration = 0
     private var previewRetries = 0
@@ -210,7 +214,7 @@ class MainActivity : ComponentActivity() {
     private fun buildInterface() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val root = FrameLayout(this).apply {
-            setBackgroundColor(0xFF08060E.toInt())
+            setBackgroundColor(0xFF07040C.toInt())
         }
         setContentView(root)
         // These controls are used by setMode() during initial construction,
@@ -232,8 +236,12 @@ class MainActivity : ComponentActivity() {
         }
         ViewCompat.requestApplyInsets(root)
 
-        viewfinderFrame = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        root.addView(viewfinderFrame, FrameLayout.LayoutParams(-1, -1))
+        viewfinderFrame = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            background = rounded(0xFF101016.toInt(), 18, 0xFF593471.toInt())
+            clipToOutline = true
+            clipChildren = true
+        }
         previewView = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             scaleType = PreviewView.ScaleType.FILL_CENTER
@@ -304,7 +312,7 @@ class MainActivity : ComponentActivity() {
         }
         focusHint.addView(hintLabel)
         viewfinderFrame.addView(focusHint, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM).apply {
-            bottomMargin = if (landscape) dp(25) else dp(270)
+            bottomMargin = dp(54)
         })
 
         val chromeRoot = LinearLayout(this).apply {
