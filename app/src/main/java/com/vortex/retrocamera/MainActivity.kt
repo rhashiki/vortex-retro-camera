@@ -801,11 +801,20 @@ class MainActivity : ComponentActivity() {
         previewRetries = 0
         filterDrawer.visibility = if (open) View.VISIBLE else View.GONE
         filterDrawer.setSelected(selectedPreset)
-        filtersQuickButton.background = neonPanel(
-            if (open) 0xFF5F1A9C.toInt() else 0x00101015,
-            14,
-            if (open) 0xFFCB83FA.toInt() else Color.TRANSPARENT
+        filmChooserButton.background = neonPanel(
+            if (open) 0xFF2F133F.toInt() else 0xF0181223.toInt(),
+            17,
+            if (open) 0xFFB262EF.toInt() else 0xFF624075.toInt()
         )
+        if (::zoomStrip.isInitialized) {
+            if (open) zoomStrip.visibility = View.GONE
+            else rebuildZoomControls()
+        }
+        if (::exposureDisplay.isInitialized) {
+            exposureDisplay.visibility = if (open) View.GONE else View.VISIBLE
+        }
+        if (::hintLabel.isInitialized) hintLabel.visibility = View.GONE
+        if (::saveLabel.isInitialized) saveLabel.visibility = View.GONE
         filmChooserButton.text = if (open)
             "◉  Filtros & Efeitos   •   " + FilmCatalog.presets[selectedPreset].name + "   ⌃"
         else "◉  Filtros & Efeitos   ⌄"
