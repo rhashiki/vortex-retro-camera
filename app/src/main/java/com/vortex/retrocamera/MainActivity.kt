@@ -131,8 +131,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var filmScrollView: HorizontalScrollView
     private lateinit var filterDrawer: FilmFilterDrawer
     private lateinit var filtersQuickButton: Button
-    private var filterDrawerOpen = false
-    private var filterPreviewGeneration = 0
+    @Volatile private var filterDrawerOpen = false
+    @Volatile private var filterPreviewGeneration = 0
     private var previewRetries = 0
     private val filterPreviewExecutor = Executors.newSingleThreadExecutor()
 
