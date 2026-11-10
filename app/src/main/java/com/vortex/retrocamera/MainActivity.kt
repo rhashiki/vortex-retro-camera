@@ -909,6 +909,33 @@ class MainActivity : ComponentActivity() {
             })
         }
         zoomStrip.visibility = if (maxZoom - minZoom < .1f) View.GONE else View.VISIBLE
+        if (::zoomQuickStrip.isInitialized) {
+            zoomQuickStrip.removeAllViews()
+            val currentOptions = options
+            currentOptions.forEach { ratio ->
+                val chosen = kotlin.math.abs(ratio - zoomRatio) < .04f
+                zoomQuickStrip.addView(neonButton(
+                    if (ratio % 1f == 0f) ratio.toInt().toString() + "×" else "0,5×",
+                    "Zoom " + ratio + " vezes"
+                ).apply {
+                    textSize = 11f
+                    background = neonPanel(
+                        if (chosen) 0xFF7D12D1.toInt() else 0x8B100C18.toInt(),
+                        18,
+                        if (chosen) 0xFFCF82FF.toInt() else Color.TRANSPARENT
+                    )
+                    setOnClickListener {
+                        activeCamera?.cameraControl?.setZoomRatio(ratio)
+                        zoomRatio = ratio
+                        rebuildZoomControls()
+                    }
+                }, LinearLayout.LayoutParams(dp(47), dp(30)).apply {
+                    setMargins(dp(2), 0, dp(2), 0)
+                })
+            }
+            zoomQuickStrip.visibility = if (currentOptions.size > 1)
+                View.VISIBLE else View.GONE
+        }
     }
 
     private fun updateNavState() {
