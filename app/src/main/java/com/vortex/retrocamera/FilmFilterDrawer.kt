@@ -37,42 +37,12 @@ class FilmFilterDrawer(
         orientation = VERTICAL
         visibility = View.GONE
         contentDescription = "Carrossel de filtros e efeitos"
-        background = panel(0xEE14101E.toInt(), 20, 0xFF6D3F88.toInt(), 1)
-        setPadding(dp(9), dp(7), dp(9), dp(10))
+        setBackgroundColor(Color.TRANSPARENT)
+        setPadding(dp(1), 0, dp(1), 0)
         clipChildren = false
 
-        val heading = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        val names = LinearLayout(context).apply { orientation = VERTICAL }
-        names.addView(TextView(context).apply {
-            text = "FILTROS & EFEITOS"
-            textSize = 12f
-            letterSpacing = 0.11f
-            setTypeface(Typeface.DEFAULT, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-        })
-        subtitle.apply {
-            text = "Prévia do visor • toque para aplicar"
-            textSize = 10f
-            setTextColor(0xFFBEA5CF.toInt())
-            setSingleLine(true)
-        }
-        names.addView(subtitle)
-        heading.addView(names, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
-        val close = TextView(context).apply {
-            text = "⌃  FECHAR"
-            textSize = 10f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFE4D4EF.toInt())
-            background = panel(0xFF2B1E3A.toInt(), 11, 0xFF5E4370.toInt(), 1)
-            contentDescription = "Fechar painel de filtros"
-            setOnClickListener { onClose() }
-        }
-        heading.addView(close, LayoutParams(dp(85), dp(36)))
-        addView(heading, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
-
+        // Header and close action are owned by the camera's single, tappable
+        // "Filtros & Efeitos" bar; do not duplicate them inside the drawer.
         scroller.isHorizontalScrollBarEnabled = false
         scroller.overScrollMode = View.OVER_SCROLL_NEVER
         scroller.isFillViewport = false
