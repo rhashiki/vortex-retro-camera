@@ -6,6 +6,7 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Color
@@ -128,6 +129,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var modeStrip: LinearLayout
     private lateinit var presetStrip: LinearLayout
     private lateinit var filmScrollView: HorizontalScrollView
+    private lateinit var filterDrawer: FilmFilterDrawer
+    private lateinit var filtersQuickButton: Button
+    @Volatile private var filterDrawerOpen = false
+    @Volatile private var filterPreviewGeneration = 0
+    private var previewRetries = 0
+    private val filterPreviewExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else toast("A câmera precisa de permissão para funcionar.")
@@ -418,17 +425,19 @@ class MainActivity : ComponentActivity() {
             background = neonPanel(0xC40D0C15.toInt(), 20, 0x804E385F.toInt())
             setPadding(dp(5), dp(3), dp(5), dp(3))
         }
-        fun addTool(title: String, click: () -> Unit, weight: Float = 1f) {
-            quickEdits.addView(neonButton(title, title).apply {
+        fun addTool(title: String, click: () -> Unit, weight: Float = 1f): Button {
+            val action = neonButton(title, title).apply {
                 textSize = 10f
                 background = neonPanel(0x00101015, 14)
                 setOnClickListener { click() }
-            }, LinearLayout.LayoutParams(0, dp(43), weight).apply {
+            }
+            quickEdits.addView(action, LinearLayout.LayoutParams(0, dp(43), weight).apply {
                 setMargins(dp(1), 0, dp(1), 0)
             })
+            return action
         }
         addTool("≡ Ajustes", { showGradeSheet() }, 1.1f)
-        addTool("◉ Filtros", { showFilmPicker() }, 1f)
+        filtersQuickButton = addTool("◉ Filtros", { showFilmPicker() }, 1f)
         addTool("✦ Efeitos", { showFilmSheet() }, 1f)
         addTool("▦ Grão", { showFilmSheet() }, .9f)
         lower.addView(quickEdits)
@@ -517,6 +526,20 @@ class MainActivity : ComponentActivity() {
             }
         }, LinearLayout.LayoutParams(dp(56), dp(56)))
         lower.addView(captureDock)
+
+        // Collapsible row of image-led film presets: completely absent from
+        // layout until the user explicitly opens Filters or the film badge.
+        filterDrawer = FilmFilterDrawer(this,
+            onSelect = { index ->
+                selectedPreset = index
+                updateFilm()
+                filterDrawer.setSelected(index)
+            },
+            onClose = { setFilterDrawerOpen(false) }
+        )
+        lower.addView(filterDrawer, LinearLayout.LayoutParams(-1, -2).apply {
+            setMargins(dp(1), dp(3), dp(1), dp(4))
+        })
 
         val navRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
@@ -635,20 +658,102 @@ class MainActivity : ComponentActivity() {
             setPadding(dp(2), 0, dp(2), 0)
         }
 
+    /** Opens native film thumbnails only on request. Closed panels use zero height. */
     private fun showFilmPicker() {
-        showSheet("Películas e câmeras", { container ->
-            container.addView(text(
-                "Escolha o perfil. Os controles Pro, Noite e Luz continuam disponíveis.",
-                11f, 0xFFD4B9E8.toInt()
-            ))
-            (filmScrollView.parent as? ViewGroup)?.removeView(filmScrollView)
-            buildPresetChips()
-            container.addView(filmScrollView, LinearLayout.LayoutParams(-1, dp(62)))
-            container.addView(text(
-                "Kodak e Fujifilm: simulações autorais de película. Sony: sensor CCD digital.",
-                10f, 0xFFAAA0B5.toInt()
-            ))
-        })
+        setFilterDrawerOpen(!filterDrawerOpen)
+    }
+
+    private fun setFilterDrawerOpen(open: Boolean) {
+        if (!::filterDrawer.isInitialized) return
+        filterDrawerOpen = open
+        filterPreviewGeneration++ // invalidate outdated background render callbacks
+        previewRetries = 0
+        filterDrawer.visibility = if (open) View.VISIBLE else View.GONE
+        filterDrawer.setSelected(selectedPreset)
+        filtersQuickButton.background = neonPanel(
+            if (open) 0xFF5F1A9C.toInt() else 0x00101015,
+            14,
+            if (open) 0xFFCB83FA.toInt() else Color.TRANSPARENT
+        )
+        filmChooserButton.text = if (open)
+            "⌃  FILTROS & EFEITOS  •  " + FilmCatalog.presets[selectedPreset].name
+        else "▣  " + FilmCatalog.presets[selectedPreset].name + "   ⌄"
+        if (open) {
+            filterDrawer.clearPreviews()
+            requestFilmPreviews()
+        } else {
+            // Do not retain old scene images once the drawer is closed.
+            filterDrawer.clearPreviews()
+        }
+    }
+
+    /**
+     * Render every film's REAL film-engine look from a small snapshot of
+     * the current CameraX preview. Work is off-main-thread, no cloud and
+     * no full-resolution bitmap is retained. Artifacts/burn are disabled
+     * in preview so that random defects never mislead filter selection.
+     */
+    private fun requestFilmPreviews() {
+        if (!filterDrawerOpen || !::previewView.isInitialized) return
+        val generation = filterPreviewGeneration
+        val shot: Bitmap? = try { previewView.bitmap } catch (_: Exception) { null }
+        if (shot == null || shot.width == 0 || shot.height == 0) {
+            shot?.recycle()
+            filterDrawer.showPreviewUnavailable()
+            if (previewRetries++ < 2) {
+                handler.postDelayed({
+                    if (filterDrawerOpen && generation == filterPreviewGeneration)
+                        requestFilmPreviews()
+                }, 700L)
+            }
+            return
+        }
+        val scaled = try {
+            Bitmap.createScaledBitmap(shot, 96, 110, true)
+        } catch (_: Exception) { null }
+        if (scaled !== shot) shot.recycle()
+        if (scaled == null) {
+            filterDrawer.showPreviewUnavailable()
+            return
+        }
+        val grade = photoGrade
+        val grain = grainStrength
+        val isOwner = !filterPreviewExecutor.isShutdown
+        if (!isOwner) {
+            scaled.recycle()
+            return
+        }
+        filterPreviewExecutor.execute {
+            try {
+                for (i in FilmCatalog.presets.indices) {
+                    if (generation != filterPreviewGeneration) break
+                    val rendered = try {
+                        FilmProcessor.process(
+                            scaled,
+                            FilmCatalog.presets[i],
+                            FilmFxSettings(
+                                grainStrength = grain,
+                                burnChance = 0f,
+                                seed = 2026,
+                                grade = grade
+                            )
+                        )
+                    } catch (_: Exception) { null }
+                    if (rendered != null) runOnUiThread {
+                        if (generation == filterPreviewGeneration && filterDrawerOpen &&
+                            !isDestroyed && !isFinishing) {
+                            filterDrawer.showPreview(i, rendered)
+                            if (i == FilmCatalog.presets.lastIndex)
+                                filterDrawer.showPreviewReady()
+                        } else {
+                            rendered.recycle()
+                        }
+                    }
+                }
+            } finally {
+                scaled.recycle()
+            }
+        }
     }
 
     private fun rebuildZoomControls() {
@@ -1288,7 +1393,12 @@ class MainActivity : ComponentActivity() {
         val preset = FilmCatalog.presets[selectedPreset]
         filmLabel.text = preset.name
         filmTagline.text = preset.tagline.uppercase(Locale.ROOT)
-        if (::filmChooserButton.isInitialized) filmChooserButton.text = "▣  " + preset.name + "   ›"
+        if (::filmChooserButton.isInitialized) {
+            filmChooserButton.text = if (filterDrawerOpen)
+                "⌃  FILTROS & EFEITOS  •  " + preset.name
+            else "▣  " + preset.name + "   ⌄"
+        }
+        if (::filterDrawer.isInitialized) filterDrawer.setSelected(selectedPreset, false)
         frameGuide.warmTint = preset.red >= preset.blue
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
         val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
@@ -1418,6 +1528,16 @@ class MainActivity : ComponentActivity() {
             )
             bound.cameraControl.setZoomRatio(zoomRatio)
             rebuildZoomControls()
+            if (filterDrawerOpen) {
+                // Camera is now bound; refresh unavailable previews from the live feed.
+                handler.postDelayed({
+                    if (filterDrawerOpen && !isDestroyed) {
+                        filterPreviewGeneration++
+                        previewRetries = 0
+                        requestFilmPreviews()
+                    }
+                }, 300L)
+            }
             nightUsingOem = nightMode && useOemNight
             manual = try { ManualCamera(bound) } catch (_: Exception) { null }
             if (manualFocus && !nightMode) {
@@ -1698,6 +1818,8 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         histogramExecutor.shutdown()
+        filterPreviewGeneration++
+        filterPreviewExecutor.shutdown()
         shutterSound.release()
         io.shutdown()
         super.onDestroy()
