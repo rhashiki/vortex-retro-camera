@@ -515,10 +515,11 @@ class MainActivity : ComponentActivity() {
 
         val captureDock = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(5), dp(7), dp(5), dp(6))
+            setPadding(dp(9), dp(2), dp(9), dp(2))
+            background = neonPanel(0xDE090611.toInt(), 16, 0xFF291934.toInt())
         }
         val galleryButton = FrameLayout(this).apply {
-            background = neonPanel(0xFF21132F.toInt(), 15, 0xFF8E58C3.toInt())
+            background = neonPanel(0xFF261831.toInt(), 15, 0xFFB578D2.toInt())
             clipChildren = true
             clipToOutline = true
             isClickable = true
@@ -529,56 +530,42 @@ class MainActivity : ComponentActivity() {
         galleryThumb = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(android.R.drawable.ic_menu_gallery)
-            background = neonPanel(0xFF1E1828.toInt(), 11)
+            background = neonPanel(0xFF21172D.toInt(), 11)
             clipToOutline = true
-            contentDescription = "Última foto"
+            contentDescription = "Última fotografia salva"
         }
         galleryButton.addView(galleryThumb, FrameLayout.LayoutParams(-1, -1).apply {
             setMargins(dp(3), dp(3), dp(3), dp(3))
         })
-        captureDock.addView(galleryButton, LinearLayout.LayoutParams(dp(56), dp(56)))
-        captureDock.addView(neonButton("▧", "Abrir galeria").apply {
-            textSize = 23f
-            setOnClickListener { startActivity(Intent(this@MainActivity, GalleryActivity::class.java)) }
-        }, LinearLayout.LayoutParams(dp(43), dp(50)).apply {
-            setMargins(dp(6), 0, 0, 0)
-        })
+        captureDock.addView(galleryButton, LinearLayout.LayoutParams(dp(60), dp(60)))
 
         val shutter = FrameLayout(this)
         shutter.addView(View(this).apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0x661E093D)
-                setStroke(dp(5), 0xFFBD58FF.toInt())
+                setColor(0x99210833.toInt())
+                setStroke(dp(5), 0xFFB44AFF.toInt())
             }
-            elevation = dp(5).toFloat()
-        }, FrameLayout.LayoutParams(dp(82), dp(82), Gravity.CENTER))
+            elevation = dp(3).toFloat()
+        }, FrameLayout.LayoutParams(dp(88), dp(88), Gravity.CENTER))
         shutterButton = Button(this).apply {
             text = ""
             contentDescription = "Fotografar"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xFFF8F3FA.toInt())
+                setColor(0xFFF9F7FB.toInt())
+                setStroke(dp(1), 0xFFDED5E6.toInt())
             }
-            elevation = dp(9).toFloat()
+            elevation = dp(5).toFloat()
             setOnClickListener {
                 if (mode == Mode.FOTO || mode == Mode.PRO) takePhoto()
                 else toast("Este modo ainda está em desenvolvimento.")
             }
         }
-        shutter.addView(shutterButton, FrameLayout.LayoutParams(dp(66), dp(66), Gravity.CENTER))
-        captureDock.addView(shutter, LinearLayout.LayoutParams(0, dp(89), 1f))
+        shutter.addView(shutterButton, FrameLayout.LayoutParams(dp(68), dp(68), Gravity.CENTER))
+        captureDock.addView(shutter, LinearLayout.LayoutParams(0, dp(96), 1f))
 
-        captureDock.addView(neonButton("▣", "Alternar para modo vídeo").apply {
-            textSize = 24f
-            setOnClickListener {
-                setMode(Mode.VIDEO)
-                toast("Captura de vídeo ainda não foi implementada.")
-            }
-        }, LinearLayout.LayoutParams(dp(43), dp(50)).apply {
-            setMargins(0, 0, dp(6), 0)
-        })
-        captureDock.addView(neonButton("↻", "Alternar câmera").apply {
+        captureDock.addView(neonButton("↻", "Alternar câmera frontal e traseira").apply {
             textSize = 26f
             setOnClickListener {
                 lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
@@ -586,7 +573,15 @@ class MainActivity : ComponentActivity() {
                 zoomRatio = 1f
                 startCamera()
             }
-        }, LinearLayout.LayoutParams(dp(56), dp(56)))
+        }, LinearLayout.LayoutParams(dp(53), dp(53)).apply {
+            setMargins(0, 0, dp(7), 0)
+        })
+        nightCaptureButton = neonButton("☾\nNoite", "Ativar modo noturno").apply {
+            textSize = 11f
+            setSingleLine(false)
+            setOnClickListener { toggleNight() }
+        }
+        captureDock.addView(nightCaptureButton, LinearLayout.LayoutParams(dp(66), dp(61)))
         lower.addView(captureDock)
 
         // Collapsible row of image-led film presets: completely absent from
@@ -605,17 +600,17 @@ class MainActivity : ComponentActivity() {
 
         val navRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER
-            background = neonPanel(0xF50F0A18.toInt(), 22, 0xFF503260.toInt())
-            setPadding(dp(3), dp(4), dp(3), dp(4))
+            background = neonPanel(0xF40E0A17.toInt(), 19, 0xFF4F3061.toInt())
+            setPadding(dp(4), dp(3), dp(4), dp(3))
         }
         modeStrip = navRow
-        // Icons and labels in the spirit of the reference, with Panorama kept accessible.
         val nav = listOf(
-            Triple("◉\nRetrô", "RETRO", "Escolher câmera analógica"),
-            Triple("▷\nVídeo", "VIDEO", "Modo vídeo"),
             Triple("▣\nFoto", "FOTO", "Modo fotografia"),
-            Triple("☷\nPro", "PRO", "Modo profissional"),
-            Triple("☾\nNoite", "NIGHT", "Modo noturno"),
+            Triple("▷\nVídeo", "VIDEO", "Modo vídeo"),
+            Triple("♙\nRetrato", "PORTRAIT", "Modo retrato"),
+            Triple("☾\nNoturno", "NIGHT", "Modo noturno"),
+            Triple("△\nPro", "PRO", "Modo profissional"),
+            Triple("▣\nRetrô", "RETRO", "Escolher filme analógico"),
             Triple("▱\nPano", "PANO", "Modo panorama")
         )
         nav.forEach { item ->
@@ -627,33 +622,41 @@ class MainActivity : ComponentActivity() {
                     "PANO" -> Mode.PANORAMA
                     else -> item.second
                 }
-                textSize = if (landscape) 9f else 10f
+                textSize = 10f
                 setSingleLine(false)
+                gravity = Gravity.CENTER
                 setOnClickListener {
                     when (item.second) {
                         "RETRO" -> {
                             if (nightMode) toggleNight()
                             setMode(Mode.FOTO)
-                            showFilmPicker()
+                            setFilterDrawerOpen(true)
                         }
                         "VIDEO" -> { if (nightMode) toggleNight(); setMode(Mode.VIDEO) }
+                        "PORTRAIT" -> toast("Retrato com desfoque óptico está em desenvolvimento.")
                         "FOTO" -> { if (nightMode) toggleNight(); setMode(Mode.FOTO) }
                         "PRO" -> {
                             if (nightMode) toggleNight()
                             setMode(Mode.PRO)
                             showProSheet()
                         }
-                        "NIGHT" -> { toggleNight(); updateNavState() }
+                        "NIGHT" -> toggleNight()
                         "PANO" -> { if (nightMode) toggleNight(); setMode(Mode.PANORAMA) }
                     }
                 }
             }
             if (item.second == "NIGHT") nightButton = button
-            navRow.addView(button, LinearLayout.LayoutParams(0, dp(64), 1f).apply {
+            navRow.addView(button, LinearLayout.LayoutParams(dp(62), dp(57)).apply {
                 setMargins(dp(1), 0, dp(1), 0)
             })
         }
-        lower.addView(navRow)
+        val navScroller = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            addView(navRow)
+        }
+        lower.addView(navScroller, LinearLayout.LayoutParams(-1, dp(65)))
+
         saveLabel = text("LOCAL • OFFLINE", 9f, 0xFFB4A7BE.toInt()).apply {
             gravity = Gravity.CENTER
             setSingleLine()
