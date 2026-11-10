@@ -38,6 +38,12 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.mutableStateOf
+import com.vortex.retrocamera.ui.CameraUiActions
+import com.vortex.retrocamera.ui.CameraUiSnapshot
+import com.vortex.retrocamera.ui.HistogramRgb
+import com.vortex.retrocamera.ui.VortexCameraScreen
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -113,6 +119,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var filmChooserButton: Button
     private var zoomRatio = 1f
     private val histogramExecutor = Executors.newSingleThreadExecutor()
+    private val composeState = mutableStateOf(CameraUiSnapshot())
+    private var composeInstalled = false
+    private var lastRgbFrameMs = 0L
     private lateinit var focusMarker: View
     private lateinit var viewfinderFrame: FrameLayout
     private lateinit var focusControlButton: Button
@@ -174,8 +183,9 @@ class MainActivity : ComponentActivity() {
             )
         }
         buildInterface()
+        installComposeInterface()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startCamera()
+            previewView.post { if (!isDestroyed && !isFinishing) startCamera() }
         } else cameraPermission.launch(Manifest.permission.CAMERA)
     }
 
@@ -186,6 +196,161 @@ class MainActivity : ComponentActivity() {
      * and cannot be pushed off-screen by Pro controls, film chips or panels.
      * Secondary settings live in scrollable bottom sheets.
      */
+    /**
+     * Compose is the visual layer only. The existing Activity retains the
+     * CameraX/Camera2 session, OEM Night extension, film engine and gallery.
+     * Bridge Views are constructed once, then detached and reused in Compose.
+     */
+    private fun installComposeInterface() {
+        (previewView.parent as? ViewGroup)?.removeView(previewView)
+        (galleryThumb.parent as? ViewGroup)?.removeView(galleryThumb)
+        // The legacy histogram view is still fed by CameraX for compatibility.
+        // Compose renders its own sampled, real RGB histogram.
+        composeInstalled = true
+        syncCompose()
+        setContent {
+            VortexCameraScreen(
+                preview = previewView,
+                gallery = galleryThumb,
+                snapshot = composeState.value,
+                actions = CameraUiActions(
+                    takePhoto = { takePhoto() },
+                    switchLens = {
+                        lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
+                            CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
+                        zoomRatio = 1f
+                        startCamera()
+                    },
+                    openGallery = {
+                        startActivity(Intent(this, GalleryActivity::class.java))
+                    },
+                    cycleFlash = { cycleFlash() },
+                    toggleNight = { toggleNight() },
+                    chooseMode = { choice ->
+                        when (choice) {
+                            "Noite" -> toggleNight()
+                            "Pro" -> {
+                                if (nightMode) toggleNight()
+                                setMode(Mode.PRO)
+                            }
+                            "Foto" -> {
+                                if (nightMode) toggleNight()
+                                setMode(Mode.FOTO)
+                            }
+                            "Vídeo" -> toast("Gravação de vídeo ainda em desenvolvimento.")
+                            else -> toast("Modo ainda em desenvolvimento.")
+                        }
+                        syncCompose()
+                    },
+                    setZoom = { ratio ->
+                        val state = activeCamera?.cameraInfo?.zoomState?.value
+                        val min = state?.minZoomRatio ?: 1f
+                        val max = state?.maxZoomRatio ?: 1f
+                        zoomRatio = ratio.coerceIn(min, max)
+                        activeCamera?.cameraControl?.setZoomRatio(zoomRatio)
+                        syncCompose()
+                    },
+                    selectFilm = { index ->
+                        selectedPreset = index.coerceIn(0, FilmCatalog.presets.lastIndex)
+                        updateFilm()
+                        syncCompose()
+                    },
+                    filtersVisible = { open ->
+                        setFilterDrawerOpen(open)
+                        if (!open) {
+                            composeState.value = composeState.value.copy(filmPreviews = emptyMap())
+                        }
+                    },
+                    setGrade = { key, value ->
+                        photoGrade = when (key) {
+                            "brightness" -> photoGrade.copy(brightness = value)
+                            "contrast" -> photoGrade.copy(contrast = value)
+                            "saturation" -> photoGrade.copy(saturation = value)
+                            "shadows" -> photoGrade.copy(shadows = value)
+                            "highlights" -> photoGrade.copy(highlights = value)
+                            "warmth" -> photoGrade.copy(warmth = value)
+                            else -> photoGrade
+                        }
+                        updateFilm()
+                    },
+                    chooseFocus = { useManual ->
+                        if (useManual && !nightMode && manual?.supportsManualFocus == true) {
+                            manualFocus = true
+                            manual?.setManualFocus(focusPercent / 100f)
+                        } else if (!useManual) {
+                            manualFocus = false
+                            manual?.setAutoFocus()
+                        } else {
+                            toast("Foco manual indisponível nesta lente ou no modo Noite.")
+                        }
+                        syncCompose()
+                    },
+                    setFocusDistance = { fraction ->
+                        focusPercent = (fraction * 100).toInt().coerceIn(0, 100)
+                        if (manualFocus) manual?.setManualFocus(focusPercent / 100f)
+                        syncCompose()
+                    },
+                    proManual = { enabled ->
+                        if (manual?.supportsManualSensor == true && mode == Mode.PRO) {
+                            proManualExposure = enabled
+                            applyManual()
+                        } else toast("ISO/obturador físicos indisponíveis nesta câmera.")
+                        syncCompose()
+                    },
+                    setIso = { value ->
+                        iso = value.coerceIn(100, 1600)
+                        if (proManualExposure && mode == Mode.PRO) applyManual()
+                        syncCompose()
+                    },
+                    setShutter = { ms ->
+                        exposureNs = ms.coerceIn(1L, 500L) * 1_000_000L
+                        if (proManualExposure && mode == Mode.PRO) applyManual()
+                        syncCompose()
+                    },
+                    showInfo = { message -> toast(message) }
+                )
+            )
+        }
+    }
+
+    private fun syncCompose() {
+        val zoom = activeCamera?.cameraInfo?.zoomState?.value
+        val lower = zoom?.minZoomRatio ?: 1f
+        val upper = zoom?.maxZoomRatio ?: 1f
+        val levels = listOf(.5f, 1f, 2f, 5f)
+            .filter { it >= lower - .01f && it <= upper + .01f }
+            .ifEmpty { listOf(1f) }
+        val count = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
+            .getInt("exposure_count", 0)
+        composeState.value = composeState.value.copy(
+            mode = when (mode) {
+                Mode.FOTO -> "Foto"
+                Mode.PRO -> "Pro"
+                Mode.VIDEO -> "Vídeo"
+                Mode.PANORAMA -> "Foto"
+            },
+            night = nightMode,
+            flash = when {
+                nightMode -> "OFF"
+                flashSetting == Flash.ON -> "ON"
+                flashSetting == Flash.AUTO -> "AUTO"
+                else -> "OFF"
+            },
+            film = selectedPreset,
+            zoom = zoomRatio,
+            zoomLevels = levels,
+            grade = photoGrade,
+            manualFocus = manualFocus,
+            manualFocusAvailable = manual?.supportsManualFocus == true && !nightMode,
+            manualExposure = proManualExposure,
+            manualExposureAvailable = manual?.supportsManualSensor == true && !nightMode,
+            iso = iso,
+            shutterMs = exposureNs / 1_000_000L,
+            busy = saving,
+            count = count
+        )
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("selected_preset", selectedPreset)
         outState.putBoolean("half_frame", halfFrame)
@@ -822,6 +987,8 @@ class MainActivity : ComponentActivity() {
         filmChooserButton.text = if (open)
             "◉  Filtros & Efeitos   •   " + FilmCatalog.presets[selectedPreset].name + "   ⌃"
         else "◉  Filtros & Efeitos   ⌄"
+        if (!open && composeInstalled)
+            composeState.value = composeState.value.copy(filmPreviews = emptyMap())
         if (::creativeRow.isInitialized) {
             val compact = resources.displayMetrics.heightPixels /
                 resources.displayMetrics.density < 750f
@@ -892,6 +1059,11 @@ class MainActivity : ComponentActivity() {
                         if (generation == filterPreviewGeneration && filterDrawerOpen &&
                             !isDestroyed && !isFinishing) {
                             filterDrawer.showPreview(i, rendered)
+                            if (composeInstalled) {
+                                composeState.value = composeState.value.copy(
+                                    filmPreviews = composeState.value.filmPreviews + (i to rendered)
+                                )
+                            }
                             if (i == FilmCatalog.presets.lastIndex)
                                 filterDrawer.showPreviewReady()
                         } else {
@@ -937,6 +1109,7 @@ class MainActivity : ComponentActivity() {
             })
         }
         zoomStrip.visibility = if (maxZoom - minZoom < .1f) View.GONE else View.VISIBLE
+        if (composeInstalled) syncCompose()
         if (::zoomQuickStrip.isInitialized) {
             zoomQuickStrip.removeAllViews()
             val currentOptions = options
@@ -1028,6 +1201,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateNightButton() {
+        if (composeInstalled) syncCompose()
         if (!::nightButton.isInitialized) return
         nightButton.text = if (nightMode) "☾\nAtiva" else "☾\nNoturno"
         if (::nightCaptureButton.isInitialized) {
@@ -1153,6 +1327,7 @@ class MainActivity : ComponentActivity() {
             Flash.AUTO -> ImageCapture.FLASH_MODE_AUTO
             Flash.ON -> ImageCapture.FLASH_MODE_ON
         }
+        if (composeInstalled) syncCompose()
         flashButton.text = "ϟ"
         if (::flashStatusLabel.isInitialized) {
             flashStatusLabel.text = when {
@@ -1473,6 +1648,7 @@ class MainActivity : ComponentActivity() {
         if (mode == Mode.PRO) applyManual() else {
             if (manualFocus) manual?.clearExposure() else manual?.reset()
         }
+        if (composeInstalled) syncCompose()
     }
 
     private fun buildProPanel() {
@@ -1618,6 +1794,7 @@ class MainActivity : ComponentActivity() {
             if (preset.red > preset.blue) 0xFFCF8B57.toInt() else 0xFF459F96.toInt()
         )
         previewTint.alpha = 0.035f
+        if (composeInstalled) syncCompose()
     }
 
     private fun startCamera() {
@@ -1695,6 +1872,38 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     histogramView.submit(buckets)
+                    // Sample genuine RGB histograms at ~5 Hz. CameraX YUV_420_888
+                    // planes are read sparsely off the UI thread, never fabricated.
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (composeInstalled && now - lastRgbFrameMs >= 210L &&
+                        image.planes.size >= 3) {
+                        lastRgbFrameMs = now
+                        val us = image.planes[1]; val vs = image.planes[2]
+                        val ub = us.buffer; val vb = vs.buffer
+                        val reds = IntArray(32); val greens = IntArray(32); val blues = IntArray(32)
+                        for (y in 0 until image.height step stepY) {
+                            for (x in 0 until image.width step stepX) {
+                                val yi = y * plane.rowStride + x * plane.pixelStride
+                                val ui = y / 2 * us.rowStride + x / 2 * us.pixelStride
+                                val vi = y / 2 * vs.rowStride + x / 2 * vs.pixelStride
+                                if (yi >= yBuffer.limit() || ui >= ub.limit() || vi >= vb.limit()) continue
+                                val yy = (yBuffer.get(yi).toInt() and 255).toFloat()
+                                val u = (ub.get(ui).toInt() and 255) - 128
+                                val v = (vb.get(vi).toInt() and 255) - 128
+                                val red = (yy + 1.402f * v).toInt().coerceIn(0, 255)
+                                val green = (yy - .344f * u - .714f * v).toInt().coerceIn(0, 255)
+                                val blue = (yy + 1.772f * u).toInt().coerceIn(0, 255)
+                                reds[red / 8]++
+                                greens[green / 8]++
+                                blues[blue / 8]++
+                            }
+                        }
+                        val frame = HistogramRgb(reds.toList(), greens.toList(), blues.toList())
+                        runOnUiThread {
+                            if (composeInstalled && !isDestroyed && !isFinishing)
+                                composeState.value = composeState.value.copy(histogram = frame)
+                        }
+                    }
                 } finally {
                     image.close()
                 }
@@ -1751,6 +1960,7 @@ class MainActivity : ComponentActivity() {
             }
             shutterButton.isEnabled = (mode == Mode.FOTO || mode == Mode.PRO) && !saving
             updateFlash()
+            if (composeInstalled) syncCompose()
         } catch (e: Exception) {
             if (useOemNight) {
                 // A device may advertise the extension but still reject binding.
@@ -1800,6 +2010,7 @@ class MainActivity : ComponentActivity() {
         if (saving || isFinishing || isDestroyed) return
         saving = true
         shutterButton.isEnabled = false
+        if (composeInstalled) syncCompose()
         saveLabel.visibility = View.VISIBLE
         saveLabel.text = if (nightMode) "CAPTURA NOTURNA • NÃO MOVA" else "PROCESSANDO FILME…"
         val capturedGrade = if (nightMode && !nightUsingOem) {
@@ -1958,6 +2169,7 @@ class MainActivity : ComponentActivity() {
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
         finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
         refreshGalleryThumbnail(uri)
+        if (composeInstalled) syncCompose()
     }
 
     private fun refreshGalleryThumbnail(photoUri: Uri? = null) {
@@ -1986,6 +2198,7 @@ class MainActivity : ComponentActivity() {
         saving = false
         shutterButton.isEnabled = mode == Mode.FOTO || mode == Mode.PRO
         saveLabel.text = message
+        if (composeInstalled) syncCompose()
         saveLabel.visibility = View.VISIBLE
         handler.postDelayed({
             if (!isFinishing && !isDestroyed && !saving && saveLabel.text == message)

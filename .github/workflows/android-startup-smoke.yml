@@ -33,22 +33,31 @@ jobs:
           profile: pixel_4
           disable-animations: true
           script: |
-            gradle --no-daemon :app:connectedDebugAndroidTest
-            # connectedDebugAndroidTest removes test-installed APKs. Reinstall the
-            # app explicitly before capturing a screenshot.
-            gradle --no-daemon :app:installDebug
+            # Install directly and capture Android runtime errors BEFORE the tests.
+            gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+            adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell pm grant com.vortex.retrocamera android.permission.CAMERA
+            adb logcat -c
             adb shell am start -n com.vortex.retrocamera/.MainActivity
-            sleep 5
-            adb shell pidof com.vortex.retrocamera
+            sleep 7
+            if ! adb shell pidof com.vortex.retrocamera; then
+              echo "Startup crash — complete Android error log follows"
+              adb logcat -d -v time | grep -A 65 -B 8 -E 'FATAL EXCEPTION|AndroidRuntime|Process: com.vortex.retrocamera' || true
+              exit 1
+            fi
             adb shell screencap -p /sdcard/vortex-premium-collapsed.png
             adb pull /sdcard/vortex-premium-collapsed.png vortex-premium-collapsed.png
             adb shell uiautomator dump /sdcard/vortex-window.xml
             adb pull /sdcard/vortex-window.xml vortex-window.xml
-            python3 -c 'import re,xml.etree.ElementTree as ET,subprocess; r=ET.parse("vortex-window.xml").getroot(); n=next((n for n in r.iter("node") if n.get("content-desc")=="Selecionar película fotográfica"),None); assert n is not None,"Filter toggle is missing"; p=list(map(int,re.findall(r"\d+",n.get("bounds")))); subprocess.run(["adb","shell","input","tap",str((p[0]+p[2])//2),str((p[1]+p[3])//2)],check=True)'
+            python3 -c 'import re,xml.etree.ElementTree as ET,subprocess; r=ET.parse("vortex-window.xml").getroot(); n=next((n for n in r.iter("node") if n.get("content-desc")=="Abrir filtros retrô"),None); assert n is not None,"Retro filter action is missing"; p=list(map(int,re.findall(r"\\d+",n.get("bounds")))); subprocess.run(["adb","shell","input","tap",str((p[0]+p[2])//2),str((p[1]+p[3])//2)],check=True)'
             sleep 2
             adb shell screencap -p /sdcard/vortex-premium-expanded.png
             adb pull /sdcard/vortex-premium-expanded.png vortex-premium-expanded.png
+            if ! gradle --no-daemon :app:connectedDebugAndroidTest; then
+              echo "Instrumentation failure; Android runtime logs:"
+              adb logcat -d -v time | grep -A 55 -B 8 -E 'FATAL EXCEPTION|AndroidRuntime|Process: com.vortex.retrocamera' || true
+              exit 1
+            fi
       - name: Upload camera layout screenshot
         if: always()
         uses: actions/upload-artifact@v4
