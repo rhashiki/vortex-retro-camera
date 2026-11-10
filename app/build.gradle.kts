@@ -14,7 +14,8 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = 5
-        versionName = "0.5.0-alpha"
+        versionName = "0.5.1-alpha"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release {
@@ -45,4 +46,6 @@ dependencies {
     implementation("androidx.camera:camera-extensions:$camerax")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:core:1.6.1")
 }
