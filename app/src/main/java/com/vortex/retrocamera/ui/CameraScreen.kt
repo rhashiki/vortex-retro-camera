@@ -233,7 +233,7 @@ fun VortexCameraScreen(
             AndroidView(
                 factory = { CameraLevelView(it) },
                 modifier = Modifier.align(Alignment.BottomStart)
-                    .padding(start = 18.dp, bottom = if (compact) 215.dp else 235.dp)
+                    .padding(start = 18.dp, bottom = if (compact) 280.dp else 315.dp)
                     .size(62.dp)
             )
 
@@ -319,15 +319,15 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     Row(
         Modifier.fillMaxWidth().height(if (compact) 40.dp else 44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        VortexMark(Modifier.size(if (compact) 29.dp else 33.dp))
+        VortexMark(Modifier.size(if (compact) 29.dp else 32.dp))
         Text(
             "Vortex Camera", color = Pearl, fontWeight = FontWeight.SemiBold,
             fontSize = if (compact) 13.sp else 15.sp,
             maxLines = 1, softWrap = false,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.widthIn(max = 132.dp)
         )
         Box(
             Modifier.clip(RoundedCornerShape(7.dp))
@@ -337,7 +337,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
         ) {
             Text("Pro", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.width(1.dp))
+        Spacer(Modifier.weight(1f))
         TopAction("HDR") { actions.showInfo("HDR em desenvolvimento.") }
         TopAction("✦AI", onAi)
         TopAction("⚙") {
@@ -384,7 +384,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 
 @Composable private fun TopAction(title: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(width = if (title == "HDR") 37.dp else 34.dp, height = 33.dp)
+        Modifier.size(width = if (title == "HDR") 35.dp else 32.dp, height = 32.dp)
             .glass(12.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
