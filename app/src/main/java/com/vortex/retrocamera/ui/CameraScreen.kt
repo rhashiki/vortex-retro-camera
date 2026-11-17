@@ -53,6 +53,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.PhotoGrade
 import com.vortex.retrocamera.video.VideoPhase
+import com.vortex.retrocamera.CameraLevelView
 import kotlin.math.roundToInt
 
 private val Violet = Color(0xFF981FFF)
@@ -91,7 +92,9 @@ data class CameraUiSnapshot(
     val videoReady: Boolean = false,
     val grainStrength: Float = 1.6f,
     val burnChance: Float = .16f,
-    val dateStamp: Boolean = false
+    val dateStamp: Boolean = false,
+    val focusX: Float? = null,
+    val focusY: Float? = null
 )
 
 /**
@@ -160,7 +163,24 @@ fun VortexCameraScreen(
             )
         ))
         CameraGrid(Modifier.fillMaxSize())
-        CameraReticle(Modifier.align(Alignment.Center).size(110.dp))
+        CameraReticle(Modifier.align(Alignment.Center).size(78.dp))
+        Canvas(Modifier.fillMaxSize()) {
+            val fx = snapshot.focusX
+            val fy = snapshot.focusY
+            if (fx != null && fy != null) {
+                drawCircle(
+                    color = VioletLight,
+                    radius = 23.dp.toPx(),
+                    center = Offset(size.width * fx, size.height * fy),
+                    style = Stroke(width = 1.7.dp.toPx())
+                )
+                drawCircle(
+                    color = Pearl,
+                    radius = 3.dp.toPx(),
+                    center = Offset(size.width * fx, size.height * fy)
+                )
+            }
+        }
 
         if (landscape) {
             // Small-height devices keep controls scrollable in a side rail.
@@ -183,6 +203,11 @@ fun VortexCameraScreen(
                 ModeNavigation(snapshot, actions, compact = true, onRetro = { toggle(CameraPanel.FILTERS) })
             }
             ZoomRail(snapshot, actions, Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
+            AndroidView(
+                factory = { CameraLevelView(it) },
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 12.dp).size(58.dp)
+            )
         } else {
             Column(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth()
@@ -204,6 +229,12 @@ fun VortexCameraScreen(
             }
 
             ZoomRail(snapshot, actions, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp))
+            AndroidView(
+                factory = { CameraLevelView(it) },
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(start = 18.dp, bottom = if (compact) 215.dp else 235.dp)
+                    .size(62.dp)
+            )
 
             // Compact panels in the reference float near top left/right, not in the shutter dock.
             AnimatedVisibility(
@@ -381,7 +412,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 
 @Composable private fun RgbHistogram(rgb: HistogramRgb) {
     Box(
-        Modifier.size(123.dp, 64.dp).glass(13.dp).testTag("rgb_histogram")
+        Modifier.size(101.dp, 54.dp).glass(13.dp).testTag("rgb_histogram")
             .padding(7.dp)
     ) {
         Canvas(Modifier.fillMaxSize()) {
@@ -444,10 +475,10 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 
 @Composable private fun ZoomRail(snapshot: CameraUiSnapshot, actions: CameraUiActions, modifier: Modifier) {
     if (snapshot.zoomLevels.size <= 1) return
-    Column(modifier.glass(25.dp).padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.glass(22.dp).padding(3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         snapshot.zoomLevels.reversed().forEach { level ->
             val active = kotlin.math.abs(level - snapshot.zoom) < .05f
-            Box(Modifier.size(43.dp).clip(CircleShape)
+            Box(Modifier.size(36.dp).clip(CircleShape)
                 .background(if (active) Violet else Color.Transparent)
                 .clickable { actions.setZoom(level) }, contentAlignment = Alignment.Center) {
                 Text(if (level % 1f == 0f) "${level.toInt()}×" else "${level}×",
