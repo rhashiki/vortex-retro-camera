@@ -388,6 +388,52 @@ class MainActivity : ComponentActivity() {
         )
     }
 
+    private fun toggleVideoAudio() {
+        if (mode != Mode.VIDEO) return
+        if (videoRecorder.blocksRebind) {
+            toast("O áudio só pode ser alterado antes de iniciar a gravação.")
+            return
+        }
+        if (audioForVideos) {
+            audioForVideos = false
+            toast("Vídeo sem microfone")
+        } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED) {
+            audioForVideos = true
+            toast("Microfone ativado para a próxima gravação")
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        syncCompose()
+    }
+
+    private fun toggleVideoRecording() {
+        if (mode != Mode.VIDEO) return
+        when (videoRecorder.state.phase) {
+            VideoPhase.PREPARING, VideoPhase.RECORDING, VideoPhase.PAUSED ->
+                videoRecorder.stop()
+            VideoPhase.FINALIZING -> toast("Finalizando vídeo, aguarde.")
+            else -> videoRecorder.start(audioForVideos)
+        }
+    }
+
+    private fun onVideoStateChanged(state: VideoRecordingState) {
+        if (state.phase == VideoPhase.SAVED) {
+            state.outputUri?.let { uri ->
+                getSharedPreferences("vortex_prefs", MODE_PRIVATE).edit()
+                    .putString("latest_video_uri", uri.toString())
+                    .putString("latest_media_uri", uri.toString())
+                    .apply()
+                refreshGalleryThumbnail(uri)
+            }
+            toast("Vídeo salvo em Filmes/Vortex Retro Camera.")
+        } else if (state.phase == VideoPhase.FAILED) {
+            toast(state.errorMessage ?: "Falha na gravação. Tente novamente.")
+        }
+        if (composeInstalled && !isDestroyed && !isFinishing) syncCompose()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putInt("selected_preset", selectedPreset)
         outState.putBoolean("half_frame", halfFrame)
@@ -1379,6 +1425,8 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleNight() {
         if (saving) return toast("Aguarda a captura atual terminar.")
+        if (videoRecorder.blocksRebind) return toast("Finalize o vídeo antes de ativar Noite.")
+        val leavingVideo = mode == Mode.VIDEO
         nightMode = !nightMode
         if (nightMode && manualFocus) {
             manualFocus = false
@@ -1393,7 +1441,8 @@ class MainActivity : ComponentActivity() {
             hintLabel.text = "NOITE: mantenha o celular parado durante a captura"
             toast("Modo noturno: captura com fusão de imagens. Segura o celular firme.")
         }
-        startCamera()
+        // Leaving video already rebinds through setMode(); no duplicate camera bind.
+        if (!leavingVideo) startCamera()
     }
 
     private fun gradeSlider(
@@ -1647,6 +1696,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        if (videoRecorder.blocksRebind && next != mode) {
+            toast("Encerre e salve o vídeo antes de mudar de modo.")
+            return
+        }
+        val switchesVideoSession = (mode == Mode.VIDEO) != (next == Mode.VIDEO)
         if (next == Mode.PRO && mode != Mode.PRO) {
             // Enter Pro with AE enabled rather than forcing ISO 400 / 1/125s.
             proManualExposure = false
@@ -1685,7 +1739,10 @@ class MainActivity : ComponentActivity() {
         if (mode == Mode.PRO) applyManual() else {
             if (manualFocus) manual?.clearExposure() else manual?.reset()
         }
-        if (composeInstalled) syncCompose()
+        if (composeInstalled) {
+            syncCompose()
+            if (switchesVideoSession) startCamera()
+        }
     }
 
     private fun buildProPanel() {
@@ -1835,6 +1892,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
+        if (videoRecorder.blocksRebind) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
         val generation = ++cameraGeneration
         capture = null
@@ -1879,6 +1937,32 @@ class MainActivity : ComponentActivity() {
         if (generation != cameraGeneration || isDestroyed || isFinishing) return
         try {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            if (mode == Mode.VIDEO) {
+                // CameraX guarantees Preview + VideoCapture on supported cameras.
+                // Avoid ImageAnalysis and Photo use cases here; the three-way
+                // combination can fail on older hardware.
+                val video = videoRecorder.createUseCase()
+                provider.unbindAll()
+                val bound = provider.bindToLifecycle(this, selector, preview, video)
+                videoRecorder.attach(video)
+                capture = null
+                activeCamera = bound
+                nightUsingOem = false
+                manual = try { ManualCamera(bound) } catch (_: Exception) { null }
+                if (manualFocus && manual?.setManualFocus(focusPercent / 100f) == false) {
+                    manualFocus = false
+                }
+                val state = bound.cameraInfo.zoomState.value
+                zoomRatio = zoomRatio.coerceIn(
+                    state?.minZoomRatio ?: 1f, state?.maxZoomRatio ?: 1f
+                )
+                bound.cameraControl.setZoomRatio(zoomRatio)
+                rebuildZoomControls()
+                composeState.value = composeState.value.copy(histogram = HistogramRgb())
+                syncCompose()
+                return
+            }
+            videoRecorder.detach()
             val photo = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
@@ -2202,6 +2286,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
         val count = prefs.getInt("exposure_count", 0) + 1
         prefs.edit().putString("latest_photo_uri", uri.toString())
+            .putString("latest_media_uri", uri.toString())
             .putInt("exposure_count", count).apply()
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
         finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
@@ -2213,7 +2298,8 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
         exposureDisplay.text = "EXPO " + prefs.getInt("exposure_count", 0)
             .toString().padStart(3, '0')
-        val target = photoUri ?: prefs.getString("latest_photo_uri", null)?.let { Uri.parse(it) }
+        val target = photoUri ?: (prefs.getString("latest_media_uri", null)
+            ?: prefs.getString("latest_photo_uri", null))?.let { Uri.parse(it) }
         if (target == null) return
         io.execute {
             val bitmap = try {
@@ -2259,6 +2345,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (::previewView.isInitialized) videoRecorder.close()
         handler.removeCallbacksAndMessages(null)
         histogramExecutor.shutdown()
         filterPreviewGeneration++
