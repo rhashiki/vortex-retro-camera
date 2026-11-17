@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.PhotoGrade
+import com.vortex.retrocamera.video.VideoPhase
 import kotlin.math.roundToInt
 
 private val Violet = Color(0xFF981FFF)
@@ -83,7 +84,11 @@ data class CameraUiSnapshot(
     val busy: Boolean = false,
     val filmPreviews: Map<Int, Bitmap> = emptyMap(),
     val histogram: HistogramRgb = HistogramRgb(),
-    val count: Int = 0
+    val count: Int = 0,
+    val videoPhase: VideoPhase = VideoPhase.IDLE,
+    val videoElapsedMs: Long = 0,
+    val videoAudioEnabled: Boolean = false,
+    val videoReady: Boolean = false
 )
 
 /**
@@ -106,7 +111,10 @@ data class CameraUiActions(
     val proManual: (Boolean) -> Unit,
     val setIso: (Int) -> Unit,
     val setShutter: (Long) -> Unit,
-    val showInfo: (String) -> Unit
+    val showInfo: (String) -> Unit,
+    val toggleVideoRecording: () -> Unit,
+    val pauseResumeVideo: () -> Unit,
+    val toggleVideoAudio: () -> Unit
 )
 
 private enum class CameraPanel { SPEC, AI, WB, FILTERS, ADJUST, FOCUS, PRO, EFFECTS }
@@ -167,7 +175,7 @@ fun VortexCameraScreen(
                     }
                 }
                 FloatingToolbar(snapshot, onChoose = { toggle(it) }, actions = actions)
-                ShutterDock(gallery, snapshot.busy, actions, compact = true)
+                ShutterDock(gallery, snapshot, actions, compact = true)
                 ModeNavigation(snapshot, actions, compact = true, onRetro = { toggle(CameraPanel.FILTERS) })
             }
             ZoomRail(snapshot, actions, Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
@@ -233,7 +241,7 @@ fun VortexCameraScreen(
                 }
                 FloatingToolbar(snapshot, onChoose = { toggle(it) }, actions = actions)
                 Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
-                ShutterDock(gallery, snapshot.busy, actions, compact = compact)
+                ShutterDock(gallery, snapshot, actions, compact = compact)
                 Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
                 ModeNavigation(snapshot, actions, compact = compact,
                     onRetro = { toggle(CameraPanel.FILTERS) })
@@ -453,32 +461,97 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     }
 }
 
-@Composable private fun ShutterDock(gallery: ImageView, busy: Boolean, actions: CameraUiActions, compact: Boolean) {
-    Row(Modifier.fillMaxWidth().height(if (compact) 86.dp else 106.dp)
-        .padding(horizontal = 14.dp).testTag("shutter_dock"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Box(Modifier.size(if (compact) 52.dp else 64.dp)
-            .glass(15.dp).clickable { actions.openGallery() }, contentAlignment = Alignment.Center) {
-            AndroidView(factory = { gallery }, modifier = Modifier.fillMaxSize().padding(3.dp))
+@Composable private fun ShutterDock(
+    gallery: ImageView,
+    snapshot: CameraUiSnapshot,
+    actions: CameraUiActions,
+    compact: Boolean
+) {
+    val isVideo = snapshot.mode == "Vídeo"
+    val phase = snapshot.videoPhase
+    val active = phase == VideoPhase.PREPARING || phase == VideoPhase.RECORDING ||
+        phase == VideoPhase.PAUSED || phase == VideoPhase.FINALIZING
+    val locked = phase == VideoPhase.PREPARING || phase == VideoPhase.FINALIZING
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (isVideo) {
+            val seconds = snapshot.videoElapsedMs / 1000L
+            val timeText = "%02d:%02d".format(seconds / 60L, seconds % 60L)
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    when (phase) {
+                        VideoPhase.PREPARING -> "PREPARANDO..."
+                        VideoPhase.RECORDING -> "● REC  $timeText"
+                        VideoPhase.PAUSED -> "Ⅱ PAUSADO  $timeText"
+                        VideoPhase.FINALIZING -> "SALVANDO VÍDEO..."
+                        else -> "VÍDEO • MP4 ORIGINAL"
+                    },
+                    color = if (active) Color(0xFFFF6575) else Pearl,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.testTag("video_status")
+                )
+                Text("SEM FILTRO NO MP4 • P1", color = Muted, fontSize = 9.sp)
+            }
         }
-        RoundAction("↺", actions.switchLens, 45.dp)
-        Box(Modifier.size(if (compact) 75.dp else 94.dp)
-            .shadow(12.dp, CircleShape, ambientColor = Violet, spotColor = VioletLight)
-            .border(5.dp, Violet, CircleShape)
-            .padding(8.dp).clip(CircleShape).background(Pearl)
-            .clickable(enabled = !busy) { actions.takePhoto() }
-            .testTag("shutter_button"))
-        RoundAction("▣", {
-            actions.showInfo("O motor de gravação de vídeo ainda não foi implementado.")
-        }, 45.dp)
-        RoundAction("◉", { actions.showInfo("Filtros disponíveis pelo modo Retrô.") }, 45.dp)
+        Row(
+            Modifier.fillMaxWidth().height(if (compact) 86.dp else 106.dp)
+                .padding(horizontal = 14.dp).testTag("shutter_dock"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                Modifier.size(if (compact) 52.dp else 64.dp)
+                    .glass(15.dp).clickable { actions.openGallery() },
+                contentAlignment = Alignment.Center
+            ) {
+                AndroidView(factory = { gallery }, modifier = Modifier.fillMaxSize().padding(3.dp))
+            }
+            RoundAction("↺", actions.switchLens, 45.dp, enabled = !active)
+            Box(
+                Modifier.size(if (compact) 75.dp else 94.dp)
+                    .shadow(12.dp, CircleShape, ambientColor = Violet, spotColor = VioletLight)
+                    .border(5.dp, if (isVideo) Color(0xFFE5495D) else Violet, CircleShape)
+                    .padding(8.dp).clip(CircleShape)
+                    .background(if (isVideo) Color(0xFFEF5266) else Pearl)
+                    .clickable(enabled = !snapshot.busy && !locked) {
+                        if (isVideo) actions.toggleVideoRecording() else actions.takePhoto()
+                    }
+                    .testTag("shutter_button")
+                    .then(if (isVideo) Modifier.testTag("video_record_button") else Modifier),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isVideo) {
+                    Text(if (active) "■" else "●", color = Color.White, fontSize = 29.sp)
+                }
+            }
+            if (isVideo) {
+                RoundAction(
+                    if (phase == VideoPhase.PAUSED) "▶" else "Ⅱ",
+                    actions.pauseResumeVideo, 45.dp,
+                    enabled = phase == VideoPhase.PAUSED || phase == VideoPhase.RECORDING
+                )
+                RoundAction(
+                    if (snapshot.videoAudioEnabled) "♫" else "♩",
+                    actions.toggleVideoAudio, 45.dp, enabled = !active
+                )
+            } else {
+                RoundAction("▣", { actions.chooseMode("Vídeo") }, 45.dp)
+                RoundAction("◉", {
+                    actions.showInfo("Escolha os filmes no modo Retrô.")
+                }, 45.dp)
+            }
+        }
     }
 }
 
-@Composable private fun RoundAction(text: String, onClick: () -> Unit, size: Dp) {
-    Box(Modifier.size(size).glass(size / 2).clickable(onClick = onClick),
+@Composable private fun RoundAction(
+    text: String, onClick: () -> Unit, size: Dp, enabled: Boolean = true
+) {
+    Box(Modifier.size(size).glass(size / 2).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center) {
         Text(text, fontSize = 23.sp, color = Pearl)
     }
@@ -567,6 +640,12 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
         }
         CameraPanel.FILTERS -> {
+            if (snapshot.mode == "Vídeo") {
+                Text(
+                    "Os filtros de vídeo serão aplicados ao MP4 na fase GPU. Nesta versão, a gravação é original, sem efeitos.",
+                    color = Color(0xFFFFC9D2), fontSize = 11.sp
+                )
+            }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Filtros", Modifier.weight(1f), color = Pearl,
                     fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
