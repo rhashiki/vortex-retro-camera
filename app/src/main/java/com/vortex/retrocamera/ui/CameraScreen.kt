@@ -146,7 +146,7 @@ fun VortexCameraScreen(
         val landscape = maxWidth > maxHeight
         val compact = maxHeight < 730.dp
         val screenHeight = maxHeight
-        val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val topInset = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
         val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
         // Same CameraX PreviewView instance, never a screenshot or a WebView.
