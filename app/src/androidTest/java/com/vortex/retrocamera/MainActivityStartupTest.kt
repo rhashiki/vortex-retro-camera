@@ -35,6 +35,19 @@ class MainActivityStartupTest {
         rule.onNodeWithTag("filter_panel").assertDoesNotExist()
     }
 
+    @Test fun switchingPhotoAndVideoKeepsPreviewMounted() {
+        rule.onNodeWithTag("mode_vídeo").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("camera_preview").assertExists()
+        rule.onNodeWithTag("video_record_button").assertExists()
+        rule.onNodeWithTag("video_status").assertExists()
+        rule.onNodeWithTag("mode_foto").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("camera_preview").assertExists()
+        rule.onNodeWithTag("video_record_button").assertDoesNotExist()
+        rule.onNodeWithTag("shutter_button").assertExists()
+    }
+
     @Test fun mainControlsRemainReachableWhenFiltersOpen() {
         rule.onNodeWithTag("mode_retrô").performClick()
         rule.waitForIdle()
