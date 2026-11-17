@@ -514,8 +514,13 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 @Composable private fun Tool(symbol: String, label: String, onClick: () -> Unit, selected: Boolean = false) {
     Column(Modifier.widthIn(min = 51.dp).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(symbol, fontSize = if (symbol == "WB") 14.sp else 21.sp,
-            color = if (selected) VioletLight else Pearl)
+        if (label == "WB") {
+            Text("WB", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = if (selected) VioletLight else Pearl)
+        } else {
+            VortexGlyph(label, 22.dp,
+                color = if (selected) VioletLight else Pearl)
+        }
         Text(label, fontSize = 9.sp, color = Pearl, maxLines = 1)
     }
 }
@@ -611,7 +616,9 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 ) {
     Box(Modifier.size(size).glass(size / 2).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 23.sp, color = Pearl)
+        if (text == "▣") VortexGlyph("Vídeo", 23.dp)
+        else if (text == "◉") VortexGlyph("Retrô", 23.dp)
+        else Text(text, fontSize = 23.sp, color = Pearl)
     }
 }
 
@@ -663,7 +670,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(icon, color = Pearl, fontSize = 19.sp, lineHeight = 19.sp)
+                VortexGlyph(name, 21.dp)
                 Text(name, color = Pearl, fontSize = 11.sp, lineHeight = 13.sp)
             }
         }
