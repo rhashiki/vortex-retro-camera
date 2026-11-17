@@ -459,7 +459,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     actions: CameraUiActions
 ) {
     Row(
-        Modifier.fillMaxWidth(.91f).height(55.dp).glass(26.dp)
+        Modifier.fillMaxWidth(.88f).height(49.dp).glass(24.dp)
             .testTag("floating_controls"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly
@@ -479,9 +479,9 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 @Composable private fun Tool(symbol: String, label: String, onClick: () -> Unit, selected: Boolean = false) {
     Column(Modifier.widthIn(min = 51.dp).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(symbol, fontSize = if (symbol == "WB") 15.sp else 23.sp,
+        Text(symbol, fontSize = if (symbol == "WB") 14.sp else 21.sp,
             color = if (selected) VioletLight else Pearl)
-        Text(label, fontSize = 10.sp, color = Pearl, maxLines = 1)
+        Text(label, fontSize = 9.sp, color = Pearl, maxLines = 1)
     }
 }
 
@@ -522,13 +522,13 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
         }
         Row(
-            Modifier.fillMaxWidth().height(if (compact) 86.dp else 106.dp)
+            Modifier.fillMaxWidth().height(if (compact) 80.dp else 91.dp)
                 .padding(horizontal = 14.dp).testTag("shutter_dock"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Box(
-                Modifier.size(if (compact) 52.dp else 64.dp)
+                Modifier.size(if (compact) 48.dp else 55.dp)
                     .glass(15.dp).clickable { actions.openGallery() },
                 contentAlignment = Alignment.Center
             ) {
@@ -536,9 +536,9 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
             RoundAction("↺", actions.switchLens, 45.dp, enabled = !active)
             Box(
-                Modifier.size(if (compact) 75.dp else 94.dp)
+                Modifier.size(if (compact) 70.dp else 80.dp)
                     .shadow(12.dp, CircleShape, ambientColor = Violet, spotColor = VioletLight)
-                    .border(5.dp, if (isVideo) Color(0xFFE5495D) else Violet, CircleShape)
+                    .border(4.dp, if (isVideo) Color(0xFFE5495D) else Violet, CircleShape)
                     .padding(8.dp).clip(CircleShape)
                     .background(if (isVideo) Color(0xFFEF5266) else Pearl)
                     .clickable(enabled = !snapshot.busy && !locked) {
@@ -587,34 +587,50 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     compact: Boolean,
     onRetro: () -> Unit
 ) {
+    // A single continuous bottom dock, as in the approved screenshot. Only
+    // the selected mode has an illuminated purple segment.
     Row(
-        Modifier.fillMaxWidth(.96f).height(if (compact) 62.dp else 70.dp)
-            .glass(27.dp).padding(3.dp).testTag("mode_navigation"),
-        horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth(.96f).height(if (compact) 55.dp else 61.dp)
+            .glass(25.dp).padding(3.dp).testTag("mode_navigation"),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        val entries = listOf("Retrô" to "▣", "Vídeo" to "▷", "Foto" to "▣",
-            "Pro" to "☷", "Noite" to "☾")
+        val entries = listOf(
+            "Retrô" to "◎",
+            "Vídeo" to "▷",
+            "Foto" to "▣",
+            "Pro" to "☷",
+            "Noite" to "☾"
+        )
         entries.forEach { (name, icon) ->
             val selected = if (name == "Noite") snapshot.night
                 else name == snapshot.mode && !snapshot.night
+            val shape = RoundedCornerShape(21.dp)
+            val background = if (selected) Modifier
+                .shadow(5.dp, shape, ambientColor = Violet, spotColor = VioletLight)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF9C31F7), Color(0xFF5700A4))
+                    ), shape
+                )
+                .border(.8.dp, VioletLight, shape)
+            else Modifier.background(Color.Transparent, shape)
             Column(
                 Modifier.weight(1f).fillMaxHeight()
-                    .glass(22.dp, selected)
+                    .then(background)
                     .testTag("mode_" + name.lowercase())
                     .semantics {
                         if (name == "Retrô") contentDescription = "Abrir filtros retrô"
                     }
                     .clickable {
-                        when (name) {
-                            "Retrô" -> onRetro()
-                            else -> actions.chooseMode(name)
-                        }
-                    }.padding(vertical = 5.dp),
+                        if (name == "Retrô") onRetro() else actions.chooseMode(name)
+                    }
+                    .padding(vertical = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(icon, color = Pearl, fontSize = 22.sp, lineHeight = 22.sp)
-                Text(name, color = Pearl, fontSize = 11.sp, lineHeight = 12.sp)
+                Text(icon, color = Pearl, fontSize = 19.sp, lineHeight = 19.sp)
+                Text(name, color = Pearl, fontSize = 11.sp, lineHeight = 13.sp)
             }
         }
     }
