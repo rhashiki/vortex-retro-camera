@@ -202,6 +202,9 @@ class MainActivity : ComponentActivity() {
                 warmth = state.getFloat("warmth")
             )
         }
+        // The Compose UI has no timer toggle yet. Never restore an invisible
+        // legacy 3s/10s countdown that makes the shutter look unresponsive.
+        timerSeconds = 0
         buildInterface()
         installComposeInterface()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
