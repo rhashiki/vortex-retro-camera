@@ -90,6 +90,9 @@ class MainActivity : ComponentActivity() {
     private val accent = Color.rgb(230, 199, 160)
     private val muted = Color.rgb(156, 156, 164)
     private val io = Executors.newSingleThreadExecutor()
+    // Keep CPU film rendering out of the CameraX capture callback executor.
+    private val photoRender = Executors.newSingleThreadExecutor()
+    private val pendingRenders = java.util.concurrent.atomic.AtomicInteger(0)
     private val shutterSound = MechanicalShutter()
     private val handler = Handler(Looper.getMainLooper())
     private var selectedPreset = 0
@@ -1969,7 +1972,7 @@ class MainActivity : ComponentActivity() {
             }
             videoRecorder.detach()
             val photo = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
                 .setFlashMode(ImageCapture.FLASH_MODE_OFF)
@@ -2184,13 +2187,34 @@ class MainActivity : ComponentActivity() {
             ImageCapture.OutputFileOptions.Builder(temporary).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    // The sensor capture is DONE. Allow another photo now while
+                    // the costly JPEG film rendering continues in a separate queue.
+                    val jobs = pendingRenders.incrementAndGet()
                     try {
-                        val source = FilmProcessor.readUpright(temporary)
-                        processAndSave(source, recipe)
-                    } catch (e: Exception) {
-                        handleCaptureError(e)
-                    } finally {
+                        photoRender.execute {
+                            try {
+                                val source = FilmProcessor.readUpright(temporary)
+                                processAndSave(source, recipe)
+                            } catch (e: Exception) {
+                                runOnUiThread {
+                                    if (!isDestroyed) toast("Falha ao revelar foto: " +
+                                        (e.localizedMessage ?: "erro desconhecido"))
+                                }
+                            } finally {
+                                temporary.delete()
+                                pendingRenders.decrementAndGet()
+                            }
+                        }
+                        runOnUiThread {
+                            if (!isDestroyed && !isFinishing) {
+                                finishCapture(if (jobs > 1) "FOTO CAPTURADA • REVELANDO NA FILA…"
+                                    else "FOTO CAPTURADA • REVELANDO…")
+                            }
+                        }
+                    } catch (e: java.util.concurrent.RejectedExecutionException) {
                         temporary.delete()
+                        pendingRenders.decrementAndGet()
+                        handleCaptureError(e)
                     }
                 }
                 override fun onError(exception: ImageCaptureException) {
@@ -2303,7 +2327,15 @@ class MainActivity : ComponentActivity() {
             .putString("latest_media_uri", uri.toString())
             .putInt("exposure_count", count).apply()
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
-        finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
+        // Rendering can finish while another capture is already underway;
+        // never unlock the shutter for the newer capture from this callback.
+        if (!saving && !photoTimerPending) {
+            saveLabel.text = "FOTO SALVA ✓"
+            saveLabel.visibility = View.VISIBLE
+            handler.postDelayed({
+                if (!saving && !isDestroyed) saveLabel.visibility = View.GONE
+            }, 1900L)
+        }
         refreshGalleryThumbnail(uri)
         if (composeInstalled) syncCompose()
     }
@@ -2373,6 +2405,7 @@ class MainActivity : ComponentActivity() {
         filterPreviewExecutor.shutdown()
         shutterSound.release()
         io.shutdown()
+        photoRender.shutdown()
         super.onDestroy()
     }
 }
