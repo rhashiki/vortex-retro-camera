@@ -94,7 +94,8 @@ data class CameraUiSnapshot(
     val burnChance: Float = .16f,
     val dateStamp: Boolean = false,
     val focusX: Float? = null,
-    val focusY: Float? = null
+    val focusY: Float? = null,
+    val photosRendering: Int = 0
 )
 
 /**
@@ -537,6 +538,15 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
         phase == VideoPhase.PAUSED || phase == VideoPhase.FINALIZING
     val locked = phase == VideoPhase.PREPARING || phase == VideoPhase.FINALIZING
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (!isVideo && snapshot.photosRendering > 0) {
+            Text(
+                "REVELANDO ${snapshot.photosRendering} FOTO(S) • CAPTURA LIBERADA",
+                color = VioletLight,
+                fontSize = 9.sp,
+                modifier = Modifier.padding(vertical = 2.dp)
+                    .testTag("photo_processing_status")
+            )
+        }
         if (isVideo) {
             val seconds = snapshot.videoElapsedMs / 1000L
             val timeText = "%02d:%02d".format(seconds / 60L, seconds % 60L)
