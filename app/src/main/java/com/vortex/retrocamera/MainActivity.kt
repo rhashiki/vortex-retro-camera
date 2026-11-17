@@ -407,7 +407,8 @@ class MainActivity : ComponentActivity() {
             videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED),
             grainStrength = grainStrength,
             burnChance = burnChance,
-            dateStamp = dateStamp
+            dateStamp = dateStamp,
+            photosRendering = pendingRenders.get()
         )
     }
 
@@ -2275,6 +2276,9 @@ class MainActivity : ComponentActivity() {
                             } finally {
                                 temporary.delete()
                                 pendingRenders.decrementAndGet()
+                                runOnUiThread {
+                                    if (!isDestroyed && composeInstalled) syncCompose()
+                                }
                             }
                         }
                         runOnUiThread {
