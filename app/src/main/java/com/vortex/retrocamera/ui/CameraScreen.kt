@@ -772,13 +772,13 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                 "Filtros" -> {
                     LazyRow(
                         Modifier.fillMaxWidth().testTag("filter_panel"),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
                         itemsIndexed(FilmCatalog.presets) { index, preset ->
                             val selected = index == snapshot.film
                             Column(
-                                Modifier.width(73.dp)
-                                    .clip(RoundedCornerShape(12.dp))
+                                Modifier.width(42.dp)
+                                    .clip(RoundedCornerShape(9.dp))
                                     .background(
                                         if (selected) Color(0xFF4D1769) else Color(0xD3170E20)
                                     )
@@ -793,8 +793,8 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                             ) {
                                 val bmp = snapshot.filmPreviews[index]
                                 Box(
-                                    Modifier.fillMaxWidth().height(63.dp)
-                                        .clip(RoundedCornerShape(9.dp))
+                                    Modifier.fillMaxWidth().height(50.dp)
+                                        .clip(RoundedCornerShape(7.dp))
                                         .background(
                                             Brush.verticalGradient(
                                                 listOf(
@@ -816,7 +816,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                                     preset.name.replace("KODAK ", "Kodak ")
                                         .replace("FUJI ", "Fuji ")
                                         .replace("VORTEX ", ""),
-                                    fontSize = 9.sp, color = Pearl,
+                                    fontSize = 8.sp, color = Pearl,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                             }
