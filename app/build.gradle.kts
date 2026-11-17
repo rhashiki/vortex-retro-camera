@@ -15,8 +15,8 @@ android {
         applicationId = "com.vortex.retrocamera"
         minSdk = 29
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.6.0-alpha"
+        versionCode = 10
+        versionName = "0.7.0-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
@@ -52,6 +52,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
     implementation("androidx.camera:camera-extensions:$camerax")
+    implementation("androidx.camera:camera-video:$camerax")
     implementation("androidx.exifinterface:exifinterface:1.4.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

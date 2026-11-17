@@ -44,6 +44,11 @@ import com.vortex.retrocamera.ui.CameraUiActions
 import com.vortex.retrocamera.ui.CameraUiSnapshot
 import com.vortex.retrocamera.ui.HistogramRgb
 import com.vortex.retrocamera.ui.VortexCameraScreen
+import com.vortex.retrocamera.video.VideoPhase
+import com.vortex.retrocamera.video.VideoRecordingController
+import com.vortex.retrocamera.video.VideoRecordingState
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.Recorder
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -104,12 +109,15 @@ class MainActivity : ComponentActivity() {
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
     private var saving = false
+    private var photoTimerPending = false
     private var capture: ImageCapture? = null
     private var activeCamera: Camera? = null
     private var manual: ManualCamera? = null
     private var iso = 400
     private var exposureNs = 8_000_000L // 1/125s
     private var proManualExposure = false // PRO starts on camera auto-exposure
+    private var audioForVideos = false // opt-in only: start without microphone
+    private val videoRecorder by lazy { VideoRecordingController(this, ::onVideoStateChanged) }
 
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
@@ -148,6 +156,12 @@ class MainActivity : ComponentActivity() {
     @Volatile private var filterPreviewGeneration = 0
     private var previewRetries = 0
     private val filterPreviewExecutor = Executors.newSingleThreadExecutor()
+
+    private val audioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        audioForVideos = granted
+        if (!granted) toast("Microfone não autorizado; vídeos continuarão sem áudio.")
+        if (composeInstalled) syncCompose()
+    }
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else toast("A câmera precisa de permissão para funcionar.")
@@ -215,16 +229,26 @@ class MainActivity : ComponentActivity() {
                 snapshot = composeState.value,
                 actions = CameraUiActions(
                     takePhoto = { takePhoto() },
+                    toggleVideoRecording = { toggleVideoRecording() },
+                    pauseResumeVideo = { videoRecorder.pauseOrResume() },
+                    toggleVideoAudio = { toggleVideoAudio() },
                     switchLens = {
+                        if (videoRecorder.blocksRebind) {
+                            toast("Finalize o vídeo antes de trocar de câmera.")
+                        } else {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                             CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
                         zoomRatio = 1f
                         startCamera()
+                        }
                     },
                     openGallery = {
                         startActivity(Intent(this, GalleryActivity::class.java))
                     },
-                    cycleFlash = { cycleFlash() },
+                    cycleFlash = {
+                        if (mode == Mode.VIDEO) toast("Flash fotográfico indisponível durante o vídeo.")
+                        else cycleFlash()
+                    },
                     toggleNight = { toggleNight() },
                     chooseMode = { choice ->
                         when (choice) {
@@ -237,7 +261,13 @@ class MainActivity : ComponentActivity() {
                                 if (nightMode) toggleNight()
                                 setMode(Mode.FOTO)
                             }
-                            "Vídeo" -> toast("Gravação de vídeo ainda em desenvolvimento.")
+                            "Vídeo" -> {
+                                if (nightMode) {
+                                    nightMode = false
+                                    updateNightButton()
+                                }
+                                setMode(Mode.VIDEO)
+                            }
                             else -> toast("Modo ainda em desenvolvimento.")
                         }
                         syncCompose()
@@ -251,9 +281,13 @@ class MainActivity : ComponentActivity() {
                         syncCompose()
                     },
                     selectFilm = { index ->
+                        if (mode == Mode.VIDEO) {
+                            toast("Os filtros de vídeo serão integrados à gravação na fase GPU.")
+                        } else {
                         selectedPreset = index.coerceIn(0, FilmCatalog.presets.lastIndex)
                         updateFilm()
                         syncCompose()
+                        }
                     },
                     filtersVisible = { open ->
                         setFilterDrawerOpen(open)
@@ -347,8 +381,58 @@ class MainActivity : ComponentActivity() {
             iso = iso,
             shutterMs = exposureNs / 1_000_000L,
             busy = saving,
-            count = count
+            count = count,
+            videoPhase = videoRecorder.state.phase,
+            videoElapsedMs = videoRecorder.state.elapsedMs,
+            videoAudioEnabled = audioForVideos,
+            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED)
         )
+    }
+
+    private fun toggleVideoAudio() {
+        if (mode != Mode.VIDEO) return
+        if (videoRecorder.blocksRebind) {
+            toast("O áudio só pode ser alterado antes de iniciar a gravação.")
+            return
+        }
+        if (audioForVideos) {
+            audioForVideos = false
+            toast("Vídeo sem microfone")
+        } else if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED) {
+            audioForVideos = true
+            toast("Microfone ativado para a próxima gravação")
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            return
+        }
+        syncCompose()
+    }
+
+    private fun toggleVideoRecording() {
+        if (mode != Mode.VIDEO || saving || photoTimerPending) return
+        when (videoRecorder.state.phase) {
+            VideoPhase.PREPARING, VideoPhase.RECORDING, VideoPhase.PAUSED ->
+                videoRecorder.stop()
+            VideoPhase.FINALIZING -> toast("Finalizando vídeo, aguarde.")
+            else -> videoRecorder.start(audioForVideos)
+        }
+    }
+
+    private fun onVideoStateChanged(state: VideoRecordingState) {
+        if (state.phase == VideoPhase.SAVED) {
+            state.outputUri?.let { uri ->
+                getSharedPreferences("vortex_prefs", MODE_PRIVATE).edit()
+                    .putString("latest_video_uri", uri.toString())
+                    .putString("latest_media_uri", uri.toString())
+                    .apply()
+                refreshGalleryThumbnail(uri)
+            }
+            toast("Vídeo salvo em Filmes/Vortex Retro Camera.")
+        } else if (state.phase == VideoPhase.FAILED) {
+            toast(state.errorMessage ?: "Falha na gravação. Tente novamente.")
+        }
+        if (composeInstalled && !isDestroyed && !isFinishing) syncCompose()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -1342,6 +1426,8 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleNight() {
         if (saving) return toast("Aguarda a captura atual terminar.")
+        if (videoRecorder.blocksRebind) return toast("Finalize o vídeo antes de ativar Noite.")
+        val leavingVideo = mode == Mode.VIDEO
         nightMode = !nightMode
         if (nightMode && manualFocus) {
             manualFocus = false
@@ -1356,7 +1442,8 @@ class MainActivity : ComponentActivity() {
             hintLabel.text = "NOITE: mantenha o celular parado durante a captura"
             toast("Modo noturno: captura com fusão de imagens. Segura o celular firme.")
         }
-        startCamera()
+        // Leaving video already rebinds through setMode(); no duplicate camera bind.
+        if (!leavingVideo) startCamera()
     }
 
     private fun gradeSlider(
@@ -1610,6 +1697,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        if ((saving || photoTimerPending) && next != mode) {
+            toast("Aguarde a fotografia atual terminar.")
+            return
+        }
+        if (videoRecorder.blocksRebind && next != mode) {
+            toast("Encerre e salve o vídeo antes de mudar de modo.")
+            return
+        }
+        val switchesVideoSession = (mode == Mode.VIDEO) != (next == Mode.VIDEO)
         if (next == Mode.PRO && mode != Mode.PRO) {
             // Enter Pro with AE enabled rather than forcing ISO 400 / 1/125s.
             proManualExposure = false
@@ -1648,7 +1744,10 @@ class MainActivity : ComponentActivity() {
         if (mode == Mode.PRO) applyManual() else {
             if (manualFocus) manual?.clearExposure() else manual?.reset()
         }
-        if (composeInstalled) syncCompose()
+        if (composeInstalled) {
+            syncCompose()
+            if (switchesVideoSession) startCamera()
+        }
     }
 
     private fun buildProPanel() {
@@ -1798,6 +1897,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startCamera() {
+        if (videoRecorder.blocksRebind) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) return
         val generation = ++cameraGeneration
         capture = null
@@ -1842,6 +1942,32 @@ class MainActivity : ComponentActivity() {
         if (generation != cameraGeneration || isDestroyed || isFinishing) return
         try {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
+            if (mode == Mode.VIDEO) {
+                // CameraX guarantees Preview + VideoCapture on supported cameras.
+                // Avoid ImageAnalysis and Photo use cases here; the three-way
+                // combination can fail on older hardware.
+                val video = videoRecorder.createUseCase()
+                provider.unbindAll()
+                val bound = provider.bindToLifecycle(this, selector, preview, video)
+                videoRecorder.attach(video)
+                capture = null
+                activeCamera = bound
+                nightUsingOem = false
+                manual = try { ManualCamera(bound) } catch (_: Exception) { null }
+                if (manualFocus && manual?.setManualFocus(focusPercent / 100f) == false) {
+                    manualFocus = false
+                }
+                val state = bound.cameraInfo.zoomState.value
+                zoomRatio = zoomRatio.coerceIn(
+                    state?.minZoomRatio ?: 1f, state?.maxZoomRatio ?: 1f
+                )
+                bound.cameraControl.setZoomRatio(zoomRatio)
+                rebuildZoomControls()
+                composeState.value = composeState.value.copy(histogram = HistogramRgb())
+                syncCompose()
+                return
+            }
+            videoRecorder.detach()
             val photo = ImageCapture.Builder()
                 .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
@@ -1989,12 +2115,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun takePhoto() {
-        if (saving) return
+        if (mode == Mode.VIDEO || saving || photoTimerPending) return
         val imageCapture = capture ?: return toast("Câmera ainda inicializando")
         if (timerSeconds > 0) {
+            photoTimerPending = true
             saveLabel.text = "TEMPORIZADOR · ${timerSeconds}s"
             shutterButton.isEnabled = false
-            handler.postDelayed({ shutterButton.isEnabled = true; captureNow(imageCapture) }, timerSeconds * 1000L)
+            if (composeInstalled) composeState.value = composeState.value.copy(busy = true)
+            handler.postDelayed({
+                photoTimerPending = false
+                if (!isDestroyed && !isFinishing &&
+                    (mode == Mode.FOTO || mode == Mode.PRO)) {
+                    shutterButton.isEnabled = true
+                    captureNow(imageCapture)
+                }
+            }, timerSeconds * 1000L)
         } else captureNow(imageCapture)
     }
 
@@ -2165,6 +2300,7 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
         val count = prefs.getInt("exposure_count", 0) + 1
         prefs.edit().putString("latest_photo_uri", uri.toString())
+            .putString("latest_media_uri", uri.toString())
             .putInt("exposure_count", count).apply()
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
         finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
@@ -2176,7 +2312,8 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("vortex_prefs", MODE_PRIVATE)
         exposureDisplay.text = "EXPO " + prefs.getInt("exposure_count", 0)
             .toString().padStart(3, '0')
-        val target = photoUri ?: prefs.getString("latest_photo_uri", null)?.let { Uri.parse(it) }
+        val target = photoUri ?: (prefs.getString("latest_media_uri", null)
+            ?: prefs.getString("latest_photo_uri", null))?.let { Uri.parse(it) }
         if (target == null) return
         io.execute {
             val bitmap = try {
@@ -2216,12 +2353,20 @@ class MainActivity : ComponentActivity() {
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
+    override fun onStop() {
+        // Do not leave a recorder active when Android sends the camera to background.
+        if (videoRecorder.blocksRebind && videoRecorder.state.phase != VideoPhase.FINALIZING)
+            videoRecorder.stop()
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         if (::galleryThumb.isInitialized) refreshGalleryThumbnail()
     }
 
     override fun onDestroy() {
+        if (::previewView.isInitialized) videoRecorder.close()
         handler.removeCallbacksAndMessages(null)
         histogramExecutor.shutdown()
         filterPreviewGeneration++
