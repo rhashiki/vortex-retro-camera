@@ -44,6 +44,11 @@ import com.vortex.retrocamera.ui.CameraUiActions
 import com.vortex.retrocamera.ui.CameraUiSnapshot
 import com.vortex.retrocamera.ui.HistogramRgb
 import com.vortex.retrocamera.ui.VortexCameraScreen
+import com.vortex.retrocamera.video.VideoPhase
+import com.vortex.retrocamera.video.VideoRecordingController
+import com.vortex.retrocamera.video.VideoRecordingState
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.Recorder
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -110,6 +115,8 @@ class MainActivity : ComponentActivity() {
     private var iso = 400
     private var exposureNs = 8_000_000L // 1/125s
     private var proManualExposure = false // PRO starts on camera auto-exposure
+    private var audioForVideos = false // opt-in only: start without microphone
+    private val videoRecorder by lazy { VideoRecordingController(this, ::onVideoStateChanged) }
 
     private lateinit var previewView: PreviewView
     private lateinit var previewTint: View
@@ -148,6 +155,12 @@ class MainActivity : ComponentActivity() {
     @Volatile private var filterPreviewGeneration = 0
     private var previewRetries = 0
     private val filterPreviewExecutor = Executors.newSingleThreadExecutor()
+
+    private val audioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        audioForVideos = granted
+        if (!granted) toast("Microfone não autorizado; vídeos continuarão sem áudio.")
+        if (composeInstalled) syncCompose()
+    }
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else toast("A câmera precisa de permissão para funcionar.")
@@ -215,16 +228,26 @@ class MainActivity : ComponentActivity() {
                 snapshot = composeState.value,
                 actions = CameraUiActions(
                     takePhoto = { takePhoto() },
+                    toggleVideoRecording = { toggleVideoRecording() },
+                    pauseResumeVideo = { videoRecorder.pauseOrResume() },
+                    toggleVideoAudio = { toggleVideoAudio() },
                     switchLens = {
+                        if (videoRecorder.blocksRebind) {
+                            toast("Finalize o vídeo antes de trocar de câmera.")
+                        } else {
                         lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK)
                             CameraSelector.LENS_FACING_FRONT else CameraSelector.LENS_FACING_BACK
                         zoomRatio = 1f
                         startCamera()
+                        }
                     },
                     openGallery = {
                         startActivity(Intent(this, GalleryActivity::class.java))
                     },
-                    cycleFlash = { cycleFlash() },
+                    cycleFlash = {
+                        if (mode == Mode.VIDEO) toast("Flash fotográfico indisponível durante o vídeo.")
+                        else cycleFlash()
+                    },
                     toggleNight = { toggleNight() },
                     chooseMode = { choice ->
                         when (choice) {
@@ -237,7 +260,13 @@ class MainActivity : ComponentActivity() {
                                 if (nightMode) toggleNight()
                                 setMode(Mode.FOTO)
                             }
-                            "Vídeo" -> toast("Gravação de vídeo ainda em desenvolvimento.")
+                            "Vídeo" -> {
+                                if (nightMode) {
+                                    nightMode = false
+                                    updateNightButton()
+                                }
+                                setMode(Mode.VIDEO)
+                            }
                             else -> toast("Modo ainda em desenvolvimento.")
                         }
                         syncCompose()
@@ -251,9 +280,13 @@ class MainActivity : ComponentActivity() {
                         syncCompose()
                     },
                     selectFilm = { index ->
+                        if (mode == Mode.VIDEO) {
+                            toast("Os filtros de vídeo serão integrados à gravação na fase GPU.")
+                        } else {
                         selectedPreset = index.coerceIn(0, FilmCatalog.presets.lastIndex)
                         updateFilm()
                         syncCompose()
+                        }
                     },
                     filtersVisible = { open ->
                         setFilterDrawerOpen(open)
@@ -347,7 +380,11 @@ class MainActivity : ComponentActivity() {
             iso = iso,
             shutterMs = exposureNs / 1_000_000L,
             busy = saving,
-            count = count
+            count = count,
+            videoPhase = videoRecorder.state.phase,
+            videoElapsedMs = videoRecorder.state.elapsedMs,
+            videoAudioEnabled = audioForVideos,
+            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED)
         )
     }
 
