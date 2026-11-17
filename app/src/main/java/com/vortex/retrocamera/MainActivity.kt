@@ -2241,8 +2241,18 @@ class MainActivity : ComponentActivity() {
                     try {
                         photoRender.execute {
                             try {
-                                val source = FilmProcessor.readUpright(temporary)
-                                processAndSave(source, recipe)
+                                if (recipe.film.name == "ORIGINAL" &&
+                                    recipe.fx.grade.isNeutral() &&
+                                    !recipe.halfFrame && !recipe.dateStamp) {
+                                    // The natural mode can save the sensor's original
+                                    // JPEG directly, preserving full resolution/EXIF
+                                    // and avoiding millions of unnecessary CPU pixels.
+                                    val uri = saveOriginalJpeg(temporary)
+                                    runOnUiThread { if (!isDestroyed) onPhotoSaved(uri) }
+                                } else {
+                                    val source = FilmProcessor.readUpright(temporary)
+                                    processAndSave(source, recipe)
+                                }
                             } catch (e: Exception) {
                                 runOnUiThread {
                                     if (!isDestroyed) toast("Falha ao revelar foto: " +
@@ -2342,6 +2352,34 @@ class MainActivity : ComponentActivity() {
                 finishCapture("Falha na captura • tente novamente")
                 toast(error.localizedMessage ?: "Erro ao fotografar")
             }
+        }
+    }
+
+    private fun saveOriginalJpeg(file: File): Uri {
+        val name = "Vortex_" +
+            SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date()) + ".jpg"
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH,
+                "${Environment.DIRECTORY_PICTURES}/Vortex Retro Camera")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val resolver = contentResolver
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("MediaStore insert failed")
+        try {
+            resolver.openOutputStream(uri)?.use { output ->
+                file.inputStream().use { input -> input.copyTo(output, 64 * 1024) }
+            } ?: error("Cannot open output stream")
+            resolver.update(
+                uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null, null
+            )
+            return uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
         }
     }
 
