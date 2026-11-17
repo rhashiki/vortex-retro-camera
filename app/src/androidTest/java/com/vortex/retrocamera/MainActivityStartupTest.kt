@@ -48,6 +48,17 @@ class MainActivityStartupTest {
         rule.onNodeWithTag("shutter_button").assertExists()
     }
 
+    @Test fun premiumControlsAndNewFilmCollectionStayAccessible() {
+        rule.onNodeWithTag("camera_preview").assertExists()
+        rule.onNodeWithTag("mode_navigation").assertExists()
+        rule.onNodeWithTag("mode_foto").assertExists()
+        rule.onNodeWithTag("mode_vídeo").assertExists()
+        rule.onNodeWithTag("mode_retrô").performClick()
+        rule.waitForIdle()
+        rule.onNodeWithTag("filter_panel").assertExists()
+        rule.onNodeWithTag("shutter_button").assertExists()
+    }
+
     @Test fun mainControlsRemainReachableWhenFiltersOpen() {
         rule.onNodeWithTag("mode_retrô").performClick()
         rule.waitForIdle()
