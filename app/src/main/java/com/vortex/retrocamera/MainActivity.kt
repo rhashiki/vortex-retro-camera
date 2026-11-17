@@ -1664,6 +1664,19 @@ class MainActivity : ComponentActivity() {
             return
         }
         val camera = activeCamera ?: return
+        if (composeInstalled && previewView.width > 0 && previewView.height > 0) {
+            val normalizedX = (x / previewView.width).coerceIn(0f, 1f)
+            val normalizedY = (y / previewView.height).coerceIn(0f, 1f)
+            composeState.value = composeState.value.copy(
+                focusX = normalizedX, focusY = normalizedY
+            )
+            handler.postDelayed({
+                if (!isDestroyed && composeInstalled &&
+                    composeState.value.focusX == normalizedX &&
+                    composeState.value.focusY == normalizedY
+                ) composeState.value = composeState.value.copy(focusX = null, focusY = null)
+            }, 1200L)
+        }
         val markerLayout = focusMarker.layoutParams as FrameLayout.LayoutParams
         markerLayout.leftMargin = (x.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.width - dp(68)).coerceAtLeast(0))
         markerLayout.topMargin = (y.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.height - dp(68)).coerceAtLeast(0))
