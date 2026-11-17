@@ -90,6 +90,9 @@ class MainActivity : ComponentActivity() {
     private val accent = Color.rgb(230, 199, 160)
     private val muted = Color.rgb(156, 156, 164)
     private val io = Executors.newSingleThreadExecutor()
+    // Keep CPU film rendering out of the CameraX capture callback executor.
+    private val photoRender = Executors.newSingleThreadExecutor()
+    private val pendingRenders = java.util.concurrent.atomic.AtomicInteger(0)
     private val shutterSound = MechanicalShutter()
     private val handler = Handler(Looper.getMainLooper())
     private var selectedPreset = 0
@@ -170,6 +173,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // The approved UI has an immersive viewfinder without Android's status row.
+        WindowCompat.getInsetsController(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.statusBars())
         window.statusBarColor = bg
         window.navigationBarColor = bg
         savedInstanceState?.let { state ->
@@ -196,6 +202,9 @@ class MainActivity : ComponentActivity() {
                 warmth = state.getFloat("warmth")
             )
         }
+        // The Compose UI has no timer toggle yet. Never restore an invisible
+        // legacy 3s/10s countdown that makes the shutter look unresponsive.
+        timerSeconds = 0
         buildInterface()
         installComposeInterface()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
@@ -232,6 +241,19 @@ class MainActivity : ComponentActivity() {
                     toggleVideoRecording = { toggleVideoRecording() },
                     pauseResumeVideo = { videoRecorder.pauseOrResume() },
                     toggleVideoAudio = { toggleVideoAudio() },
+                    setFilmFx = { key, value ->
+                        if (mode == Mode.VIDEO) {
+                            toast("Os efeitos analógicos de vídeo ainda não são gravados no MP4.")
+                        } else {
+                            when (key) {
+                                "grain" -> grainStrength = value.coerceIn(0f, 3f)
+                                "burn" -> burnChance = value.coerceIn(0f, 1f)
+                                "date" -> dateStamp = value > .5f
+                            }
+                            syncCompose()
+                            scheduleFilmPreviewRefresh()
+                        }
+                    },
                     switchLens = {
                         if (videoRecorder.blocksRebind) {
                             toast("Finalize o vídeo antes de trocar de câmera.")
@@ -385,7 +407,11 @@ class MainActivity : ComponentActivity() {
             videoPhase = videoRecorder.state.phase,
             videoElapsedMs = videoRecorder.state.elapsedMs,
             videoAudioEnabled = audioForVideos,
-            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED)
+            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED),
+            grainStrength = grainStrength,
+            burnChance = burnChance,
+            dateStamp = dateStamp,
+            photosRendering = pendingRenders.get()
         )
     }
 
@@ -1093,6 +1119,15 @@ class MainActivity : ComponentActivity() {
      * no full-resolution bitmap is retained. Artifacts/burn are disabled
      * in preview so that random defects never mislead filter selection.
      */
+    private fun scheduleFilmPreviewRefresh() {
+        if (!filterDrawerOpen || isFinishing || isDestroyed) return
+        val pending = ++filterPreviewGeneration
+        handler.postDelayed({
+            if (filterDrawerOpen && pending == filterPreviewGeneration &&
+                !isFinishing && !isDestroyed) requestFilmPreviews()
+        }, 250L)
+    }
+
     private fun requestFilmPreviews() {
         if (!filterDrawerOpen || !::previewView.isInitialized) return
         val generation = filterPreviewGeneration
@@ -1633,6 +1668,19 @@ class MainActivity : ComponentActivity() {
             return
         }
         val camera = activeCamera ?: return
+        if (composeInstalled && previewView.width > 0 && previewView.height > 0) {
+            val normalizedX = (x / previewView.width).coerceIn(0f, 1f)
+            val normalizedY = (y / previewView.height).coerceIn(0f, 1f)
+            composeState.value = composeState.value.copy(
+                focusX = normalizedX, focusY = normalizedY
+            )
+            handler.postDelayed({
+                if (!isDestroyed && composeInstalled &&
+                    composeState.value.focusX == normalizedX &&
+                    composeState.value.focusY == normalizedY
+                ) composeState.value = composeState.value.copy(focusX = null, focusY = null)
+            }, 1200L)
+        }
         val markerLayout = focusMarker.layoutParams as FrameLayout.LayoutParams
         markerLayout.leftMargin = (x.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.width - dp(68)).coerceAtLeast(0))
         markerLayout.topMargin = (y.toInt() - dp(34)).coerceIn(0, (viewfinderFrame.height - dp(68)).coerceAtLeast(0))
@@ -1865,27 +1913,42 @@ class MainActivity : ComponentActivity() {
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
         val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
             .coerceIn(0.5f, 1.85f)
-        val sat = (1f + photoGrade.saturation * .70f).coerceIn(0f, 1.75f)
+        val sat = (
+            (if (preset.monochrome) 0f else preset.saturation) *
+            (1f + photoGrade.saturation * .70f)
+        ).coerceIn(0f, 1.75f)
         val desat = 1f - sat
         val offset = (1f - contrast) * 128f + preset.lift * 110f +
             photoGrade.brightness * 36f
         val warmth = photoGrade.warmth * 17f
+        val redTint = preset.shadowTintR * 40f + preset.highlightTintR * 56f
+        val greenTint = preset.shadowTintG * 40f + preset.highlightTintG * 56f
+        val blueTint = preset.shadowTintB * 40f + preset.highlightTintB * 56f
+        val fade = preset.fadedBlacks * 28f
         val colorMatrix = floatArrayOf(
             (sat + desat * .2126f) * preset.red * contrast,
             desat * .7152f * contrast,
-            desat * .0722f * contrast, 0f, offset + warmth,
+            desat * .0722f * contrast, 0f, offset + warmth + redTint + fade,
             desat * .2126f * contrast,
             (sat + desat * .7152f) * preset.green * contrast,
-            desat * .0722f * contrast, 0f, offset,
+            desat * .0722f * contrast, 0f, offset + greenTint + fade,
             desat * .2126f * contrast,
             desat * .7152f * contrast,
-            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth,
+            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth + blueTint + fade,
             0f, 0f, 0f, 1f, 0f
         )
         try {
-            previewView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply {
-                colorFilter = ColorMatrixColorFilter(colorMatrix)
-            })
+            val filter = ColorMatrixColorFilter(colorMatrix)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                previewView.setRenderEffect(
+                    android.graphics.RenderEffect.createColorFilterEffect(filter)
+                )
+            } else {
+                // CameraX runs PreviewView COMPATIBLE (TextureView) for pre-31 devices.
+                previewView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply {
+                    colorFilter = filter
+                })
+            }
         } catch (_: RuntimeException) {
             previewView.setLayerType(View.LAYER_TYPE_NONE, null)
         }
@@ -1943,6 +2006,10 @@ class MainActivity : ComponentActivity() {
         try {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             if (mode == Mode.VIDEO) {
+                // Photo preview grading must not masquerade as a recorded-video effect.
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S)
+                    previewView.setRenderEffect(null)
+                previewView.setLayerType(View.LAYER_TYPE_NONE, null)
                 // CameraX guarantees Preview + VideoCapture on supported cameras.
                 // Avoid ImageAnalysis and Photo use cases here; the three-way
                 // combination can fail on older hardware.
@@ -1969,7 +2036,7 @@ class MainActivity : ComponentActivity() {
             }
             videoRecorder.detach()
             val photo = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                 .setTargetAspectRatio(AspectRatio.RATIO_4_3)
                 .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
                 .setFlashMode(ImageCapture.FLASH_MODE_OFF)
@@ -2044,6 +2111,7 @@ class MainActivity : ComponentActivity() {
             }
             capture = photo
             activeCamera = bound
+            if (composeInstalled) updateFilm()
             zoomRatio = zoomRatio.coerceIn(
                 bound.cameraInfo.zoomState.value?.minZoomRatio ?: 1f,
                 bound.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
@@ -2116,6 +2184,7 @@ class MainActivity : ComponentActivity() {
 
     private fun takePhoto() {
         if (mode == Mode.VIDEO || saving || photoTimerPending) return
+        if (pendingRenders.get() >= 6) return toast("Revelando outras fotos; aguarde a fila.")
         val imageCapture = capture ?: return toast("Câmera ainda inicializando")
         if (timerSeconds > 0) {
             photoTimerPending = true
@@ -2184,13 +2253,47 @@ class MainActivity : ComponentActivity() {
             ImageCapture.OutputFileOptions.Builder(temporary).build(), io,
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    // The sensor capture is DONE. Allow another photo now while
+                    // the costly JPEG film rendering continues in a separate queue.
+                    val jobs = pendingRenders.incrementAndGet()
                     try {
-                        val source = FilmProcessor.readUpright(temporary)
-                        processAndSave(source, recipe)
-                    } catch (e: Exception) {
-                        handleCaptureError(e)
-                    } finally {
+                        photoRender.execute {
+                            try {
+                                if (recipe.film.name == "ORIGINAL" &&
+                                    recipe.fx.grade.isNeutral() &&
+                                    !recipe.halfFrame && !recipe.dateStamp) {
+                                    // The natural mode can save the sensor's original
+                                    // JPEG directly, preserving full resolution/EXIF
+                                    // and avoiding millions of unnecessary CPU pixels.
+                                    val uri = saveOriginalJpeg(temporary)
+                                    runOnUiThread { if (!isDestroyed) onPhotoSaved(uri) }
+                                } else {
+                                    val source = FilmProcessor.readUpright(temporary)
+                                    processAndSave(source, recipe)
+                                }
+                            } catch (e: Exception) {
+                                runOnUiThread {
+                                    if (!isDestroyed) toast("Falha ao revelar foto: " +
+                                        (e.localizedMessage ?: "erro desconhecido"))
+                                }
+                            } finally {
+                                temporary.delete()
+                                pendingRenders.decrementAndGet()
+                                runOnUiThread {
+                                    if (!isDestroyed && composeInstalled) syncCompose()
+                                }
+                            }
+                        }
+                        runOnUiThread {
+                            if (!isDestroyed && !isFinishing) {
+                                finishCapture(if (jobs > 1) "FOTO CAPTURADA • REVELANDO NA FILA…"
+                                    else "FOTO CAPTURADA • REVELANDO…")
+                            }
+                        }
+                    } catch (e: java.util.concurrent.RejectedExecutionException) {
                         temporary.delete()
+                        pendingRenders.decrementAndGet()
+                        handleCaptureError(e)
                     }
                 }
                 override fun onError(exception: ImageCaptureException) {
@@ -2273,6 +2376,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun saveOriginalJpeg(file: File): Uri {
+        val name = "Vortex_" +
+            SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date()) + ".jpg"
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.RELATIVE_PATH,
+                "${Environment.DIRECTORY_PICTURES}/Vortex Retro Camera")
+            put(MediaStore.Images.Media.IS_PENDING, 1)
+        }
+        val resolver = contentResolver
+        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            ?: error("MediaStore insert failed")
+        try {
+            resolver.openOutputStream(uri)?.use { output ->
+                file.inputStream().use { input -> input.copyTo(output, 64 * 1024) }
+            } ?: error("Cannot open output stream")
+            resolver.update(
+                uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) },
+                null, null
+            )
+            return uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
     private fun saveToGallery(image: android.graphics.Bitmap): Uri {
         val filename = "Vortex_${SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())}.jpg"
         val values = ContentValues().apply {
@@ -2303,7 +2434,15 @@ class MainActivity : ComponentActivity() {
             .putString("latest_media_uri", uri.toString())
             .putInt("exposure_count", count).apply()
         exposureDisplay.text = "EXPO " + count.toString().padStart(3, '0')
-        finishCapture("REVELADA ✓   •   TOQUE NA MINIATURA PARA ABRIR")
+        // Rendering can finish while another capture is already underway;
+        // never unlock the shutter for the newer capture from this callback.
+        if (!saving && !photoTimerPending) {
+            saveLabel.text = "FOTO SALVA ✓"
+            saveLabel.visibility = View.VISIBLE
+            handler.postDelayed({
+                if (!saving && !isDestroyed) saveLabel.visibility = View.GONE
+            }, 1900L)
+        }
         refreshGalleryThumbnail(uri)
         if (composeInstalled) syncCompose()
     }
@@ -2373,6 +2512,7 @@ class MainActivity : ComponentActivity() {
         filterPreviewExecutor.shutdown()
         shutterSound.release()
         io.shutdown()
+        photoRender.shutdown()
         super.onDestroy()
     }
 }

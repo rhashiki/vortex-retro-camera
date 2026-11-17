@@ -53,6 +53,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.vortex.retrocamera.film.FilmCatalog
 import com.vortex.retrocamera.film.PhotoGrade
 import com.vortex.retrocamera.video.VideoPhase
+import com.vortex.retrocamera.CameraLevelView
 import kotlin.math.roundToInt
 
 private val Violet = Color(0xFF981FFF)
@@ -88,7 +89,13 @@ data class CameraUiSnapshot(
     val videoPhase: VideoPhase = VideoPhase.IDLE,
     val videoElapsedMs: Long = 0,
     val videoAudioEnabled: Boolean = false,
-    val videoReady: Boolean = false
+    val videoReady: Boolean = false,
+    val grainStrength: Float = 1.6f,
+    val burnChance: Float = .16f,
+    val dateStamp: Boolean = false,
+    val focusX: Float? = null,
+    val focusY: Float? = null,
+    val photosRendering: Int = 0
 )
 
 /**
@@ -114,7 +121,8 @@ data class CameraUiActions(
     val showInfo: (String) -> Unit,
     val toggleVideoRecording: () -> Unit,
     val pauseResumeVideo: () -> Unit,
-    val toggleVideoAudio: () -> Unit
+    val toggleVideoAudio: () -> Unit,
+    val setFilmFx: (String, Float) -> Unit
 )
 
 private enum class CameraPanel { SPEC, AI, WB, FILTERS, ADJUST, FOCUS, PRO, EFFECTS }
@@ -139,7 +147,7 @@ fun VortexCameraScreen(
         val landscape = maxWidth > maxHeight
         val compact = maxHeight < 730.dp
         val screenHeight = maxHeight
-        val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val topInset = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
         val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
         // Same CameraX PreviewView instance, never a screenshot or a WebView.
@@ -156,7 +164,24 @@ fun VortexCameraScreen(
             )
         ))
         CameraGrid(Modifier.fillMaxSize())
-        CameraReticle(Modifier.align(Alignment.Center).size(110.dp))
+        CameraReticle(Modifier.align(Alignment.Center).size(78.dp))
+        Canvas(Modifier.fillMaxSize()) {
+            val fx = snapshot.focusX
+            val fy = snapshot.focusY
+            if (fx != null && fy != null) {
+                drawCircle(
+                    color = VioletLight,
+                    radius = 23.dp.toPx(),
+                    center = Offset(size.width * fx, size.height * fy),
+                    style = Stroke(width = 1.7.dp.toPx())
+                )
+                drawCircle(
+                    color = Pearl,
+                    radius = 3.dp.toPx(),
+                    center = Offset(size.width * fx, size.height * fy)
+                )
+            }
+        }
 
         if (landscape) {
             // Small-height devices keep controls scrollable in a side rail.
@@ -179,6 +204,11 @@ fun VortexCameraScreen(
                 ModeNavigation(snapshot, actions, compact = true, onRetro = { toggle(CameraPanel.FILTERS) })
             }
             ZoomRail(snapshot, actions, Modifier.align(Alignment.CenterStart).padding(start = 12.dp))
+            AndroidView(
+                factory = { CameraLevelView(it) },
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(start = 16.dp, bottom = 12.dp).size(58.dp)
+            )
         } else {
             Column(
                 Modifier.align(Alignment.TopCenter).fillMaxWidth()
@@ -187,19 +217,25 @@ fun VortexCameraScreen(
                 Branding(compact = compact, actions = actions,
                     onSpec = { toggle(CameraPanel.SPEC) },
                     onAi = { toggle(CameraPanel.AI) })
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Chip("AUTO MP  |  4:3  |  JPEG  ⌄", selected = panel == CameraPanel.SPEC,
+                    Chip(if (snapshot.mode == "Vídeo") "HD  |  SDR  |  MP4  ⌄" else "AUTO MP  |  4:3  |  JPEG  ⌄", selected = panel == CameraPanel.SPEC,
                         modifier = Modifier.testTag("capture_spec")) { toggle(CameraPanel.SPEC) }
                     RgbHistogram(snapshot.histogram)
                 }
             }
 
             ZoomRail(snapshot, actions, Modifier.align(Alignment.CenterEnd).padding(end = 12.dp))
+            AndroidView(
+                factory = { CameraLevelView(it) },
+                modifier = Modifier.align(Alignment.BottomStart)
+                    .padding(start = 18.dp, bottom = if (compact) 280.dp else 315.dp)
+                    .size(62.dp)
+            )
 
             // Compact panels in the reference float near top left/right, not in the shutter dock.
             AnimatedVisibility(
@@ -240,9 +276,9 @@ fun VortexCameraScreen(
                     }
                 }
                 FloatingToolbar(snapshot, onChoose = { toggle(it) }, actions = actions)
-                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
                 ShutterDock(gallery, snapshot, actions, compact = compact)
-                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
                 ModeNavigation(snapshot, actions, compact = compact,
                     onRetro = { toggle(CameraPanel.FILTERS) })
             }
@@ -279,59 +315,83 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     onSpec: () -> Unit,
     onAi: () -> Unit
 ) {
+    // Balanced for 360dp-wide screens, following the approved visual reference.
     Row(
-        Modifier.fillMaxWidth().height(if (compact) 44.dp else 52.dp),
+        Modifier.fillMaxWidth().height(if (compact) 40.dp else 44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        VortexMark(Modifier.size(37.dp))
+        VortexMark(Modifier.size(if (compact) 29.dp else 32.dp))
         Text(
-            "Vortex Camera", color = Pearl, fontWeight = FontWeight.Bold,
-            fontSize = if (compact) 15.sp else 18.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+            "Vortex Camera", color = Pearl, fontWeight = FontWeight.SemiBold,
+            fontSize = if (compact) 13.sp else 15.sp,
+            maxLines = 1, softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.widthIn(max = 132.dp)
         )
-        Box(Modifier.glass(8.dp, active = true).clickable {
-            actions.chooseMode("Pro")
-        }.padding(horizontal = 8.dp, vertical = 5.dp)) {
-            Text("Pro", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier.clip(RoundedCornerShape(7.dp))
+                .background(Brush.horizontalGradient(listOf(Color(0xFF54018C), Violet)))
+                .clickable { actions.chooseMode("Pro") }
+                .padding(horizontal = 7.dp, vertical = 4.dp)
+        ) {
+            Text("Pro", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        if (!compact) Spacer(Modifier.width(5.dp))
-        TopAction("HDR") { actions.showInfo("HDR ainda não possui processamento implementado.") }
+        Spacer(Modifier.weight(1f))
+        TopAction("HDR") { actions.showInfo("HDR em desenvolvimento.") }
         TopAction("✦AI", onAi)
-        TopAction("⚙") { actions.showInfo("Configurações avançadas disponíveis nas barras inferiores.") }
+        TopAction("⚙") {
+            actions.showInfo("Configurações: utilize o painel de Ajustes e Pro.")
+        }
     }
 }
 
 @Composable private fun VortexMark(modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val radius = size.minDimension * .40f
+        val outer = size.minDimension * .49f
+        // Six optical blades produce the rotating iris logo of the approved reference.
         repeat(6) { i ->
             rotate(i * 60f, center) {
                 val p = Path().apply {
-                    moveTo(center.x, center.y)
-                    cubicTo(center.x - radius * .8f, center.y - radius * .15f,
-                        center.x - radius * .7f, center.y - radius,
-                        center.x + radius * .2f, center.y - radius)
-                    cubicTo(center.x + radius * .7f, center.y - radius * .8f,
-                        center.x + radius * .65f, center.y - radius * .2f,
-                        center.x, center.y)
+                    moveTo(center.x + outer * .09f, center.y + outer * .13f)
+                    cubicTo(
+                        center.x - outer * .50f, center.y - outer * .05f,
+                        center.x - outer * .67f, center.y - outer * .60f,
+                        center.x - outer * .25f, center.y - outer * .98f
+                    )
+                    cubicTo(
+                        center.x + outer * .22f, center.y - outer * 1.12f,
+                        center.x + outer * .80f, center.y - outer * .59f,
+                        center.x + outer * .59f, center.y - outer * .35f
+                    )
+                    cubicTo(
+                        center.x + outer * .40f, center.y - outer * .12f,
+                        center.x + outer * .20f, center.y - outer * .01f,
+                        center.x + outer * .09f, center.y + outer * .13f
+                    )
                     close()
                 }
-                drawPath(p, Brush.linearGradient(listOf(VioletLight, Violet, Color(0xFF3F0784))))
+                drawPath(p,
+                    Brush.linearGradient(
+                        listOf(Color(0xFFE7A8FF), Color(0xFF9C14EB), Color(0xFF41006F))
+                    )
+                )
             }
         }
-        drawCircle(Color(0xFF17051E), radius * .18f)
+        drawCircle(Color(0xFF120419), outer * .16f)
     }
 }
 
 @Composable private fun TopAction(title: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(width = if (title == "HDR") 47.dp else 44.dp, height = 39.dp)
-            .glass(13.dp).clickable(onClick = onClick),
+        Modifier.size(width = if (title == "HDR") 35.dp else 32.dp, height = 32.dp)
+            .glass(12.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(title, color = Pearl, fontSize = if (title == "HDR") 12.sp else 17.sp,
-            fontWeight = FontWeight.SemiBold)
+        Text(title, color = Pearl,
+            fontSize = when (title) { "HDR" -> 11.sp; "✦AI" -> 12.sp; else -> 17.sp },
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
@@ -353,7 +413,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 
 @Composable private fun RgbHistogram(rgb: HistogramRgb) {
     Box(
-        Modifier.size(123.dp, 64.dp).glass(13.dp).testTag("rgb_histogram")
+        Modifier.size(101.dp, 54.dp).glass(13.dp).testTag("rgb_histogram")
             .padding(7.dp)
     ) {
         Canvas(Modifier.fillMaxSize()) {
@@ -416,10 +476,10 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 
 @Composable private fun ZoomRail(snapshot: CameraUiSnapshot, actions: CameraUiActions, modifier: Modifier) {
     if (snapshot.zoomLevels.size <= 1) return
-    Column(modifier.glass(25.dp).padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier.glass(22.dp).padding(3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         snapshot.zoomLevels.reversed().forEach { level ->
             val active = kotlin.math.abs(level - snapshot.zoom) < .05f
-            Box(Modifier.size(43.dp).clip(CircleShape)
+            Box(Modifier.size(36.dp).clip(CircleShape)
                 .background(if (active) Violet else Color.Transparent)
                 .clickable { actions.setZoom(level) }, contentAlignment = Alignment.Center) {
                 Text(if (level % 1f == 0f) "${level.toInt()}×" else "${level}×",
@@ -435,7 +495,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     actions: CameraUiActions
 ) {
     Row(
-        Modifier.fillMaxWidth(.91f).height(55.dp).glass(26.dp)
+        Modifier.fillMaxWidth(.88f).height(49.dp).glass(24.dp)
             .testTag("floating_controls"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly
@@ -455,9 +515,14 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 @Composable private fun Tool(symbol: String, label: String, onClick: () -> Unit, selected: Boolean = false) {
     Column(Modifier.widthIn(min = 51.dp).clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(symbol, fontSize = if (symbol == "WB") 15.sp else 23.sp,
-            color = if (selected) VioletLight else Pearl)
-        Text(label, fontSize = 10.sp, color = Pearl, maxLines = 1)
+        if (label == "WB") {
+            Text("WB", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                color = if (selected) VioletLight else Pearl)
+        } else {
+            VortexGlyph(label, 22.dp,
+                color = if (selected) VioletLight else Pearl)
+        }
+        Text(label, fontSize = 9.sp, color = Pearl, maxLines = 1)
     }
 }
 
@@ -473,6 +538,15 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
         phase == VideoPhase.PAUSED || phase == VideoPhase.FINALIZING
     val locked = phase == VideoPhase.PREPARING || phase == VideoPhase.FINALIZING
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (!isVideo && snapshot.photosRendering > 0) {
+            Text(
+                "REVELANDO ${snapshot.photosRendering} FOTO(S) • CAPTURA LIBERADA",
+                color = VioletLight,
+                fontSize = 9.sp,
+                modifier = Modifier.padding(vertical = 2.dp)
+                    .testTag("photo_processing_status")
+            )
+        }
         if (isVideo) {
             val seconds = snapshot.videoElapsedMs / 1000L
             val timeText = "%02d:%02d".format(seconds / 60L, seconds % 60L)
@@ -498,13 +572,13 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
         }
         Row(
-            Modifier.fillMaxWidth().height(if (compact) 86.dp else 106.dp)
+            Modifier.fillMaxWidth().height(if (compact) 80.dp else 91.dp)
                 .padding(horizontal = 14.dp).testTag("shutter_dock"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Box(
-                Modifier.size(if (compact) 52.dp else 64.dp)
+                Modifier.size(if (compact) 48.dp else 55.dp)
                     .glass(15.dp).clickable { actions.openGallery() },
                 contentAlignment = Alignment.Center
             ) {
@@ -512,16 +586,15 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
             RoundAction("↺", actions.switchLens, 45.dp, enabled = !active)
             Box(
-                Modifier.size(if (compact) 75.dp else 94.dp)
+                Modifier.size(if (compact) 70.dp else 80.dp)
                     .shadow(12.dp, CircleShape, ambientColor = Violet, spotColor = VioletLight)
-                    .border(5.dp, if (isVideo) Color(0xFFE5495D) else Violet, CircleShape)
+                    .border(4.dp, if (isVideo) Color(0xFFE5495D) else Violet, CircleShape)
                     .padding(8.dp).clip(CircleShape)
                     .background(if (isVideo) Color(0xFFEF5266) else Pearl)
                     .clickable(enabled = !snapshot.busy && !locked) {
                         if (isVideo) actions.toggleVideoRecording() else actions.takePhoto()
                     }
-                    .testTag("shutter_button")
-                    .then(if (isVideo) Modifier.testTag("video_record_button") else Modifier),
+                    .testTag(if (isVideo) "video_record_button" else "shutter_button"),
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
@@ -553,7 +626,9 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
 ) {
     Box(Modifier.size(size).glass(size / 2).clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 23.sp, color = Pearl)
+        if (text == "▣") VortexGlyph("Vídeo", 23.dp)
+        else if (text == "◉") VortexGlyph("Retrô", 23.dp)
+        else Text(text, fontSize = 23.sp, color = Pearl)
     }
 }
 
@@ -563,34 +638,50 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     compact: Boolean,
     onRetro: () -> Unit
 ) {
+    // A single continuous bottom dock, as in the approved screenshot. Only
+    // the selected mode has an illuminated purple segment.
     Row(
-        Modifier.fillMaxWidth(.96f).height(if (compact) 62.dp else 70.dp)
-            .glass(27.dp).padding(3.dp).testTag("mode_navigation"),
-        horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically
+        Modifier.fillMaxWidth(.96f).height(if (compact) 55.dp else 61.dp)
+            .glass(25.dp).padding(3.dp).testTag("mode_navigation"),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        val entries = listOf("Retrô" to "▣", "Vídeo" to "▷", "Foto" to "▣",
-            "Pro" to "☷", "Noite" to "☾")
+        val entries = listOf(
+            "Retrô" to "◎",
+            "Vídeo" to "▷",
+            "Foto" to "▣",
+            "Pro" to "☷",
+            "Noite" to "☾"
+        )
         entries.forEach { (name, icon) ->
             val selected = if (name == "Noite") snapshot.night
                 else name == snapshot.mode && !snapshot.night
+            val shape = RoundedCornerShape(21.dp)
+            val background = if (selected) Modifier
+                .shadow(5.dp, shape, ambientColor = Violet, spotColor = VioletLight)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF9C31F7), Color(0xFF5700A4))
+                    ), shape
+                )
+                .border(.8.dp, VioletLight, shape)
+            else Modifier.background(Color.Transparent, shape)
             Column(
                 Modifier.weight(1f).fillMaxHeight()
-                    .glass(22.dp, selected)
+                    .then(background)
                     .testTag("mode_" + name.lowercase())
                     .semantics {
                         if (name == "Retrô") contentDescription = "Abrir filtros retrô"
                     }
                     .clickable {
-                        when (name) {
-                            "Retrô" -> onRetro()
-                            else -> actions.chooseMode(name)
-                        }
-                    }.padding(vertical = 5.dp),
+                        if (name == "Retrô") onRetro() else actions.chooseMode(name)
+                    }
+                    .padding(vertical = 3.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(icon, color = Pearl, fontSize = 22.sp, lineHeight = 22.sp)
-                Text(name, color = Pearl, fontSize = 11.sp, lineHeight = 12.sp)
+                VortexGlyph(name, 21.dp)
+                Text(name, color = Pearl, fontSize = 11.sp, lineHeight = 13.sp)
             }
         }
     }
@@ -640,48 +731,138 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
         }
         CameraPanel.FILTERS -> {
-            if (snapshot.mode == "Vídeo") {
-                Text(
-                    "Os filtros de vídeo serão aplicados ao MP4 na fase GPU. Nesta versão, a gravação é original, sem efeitos.",
-                    color = Color(0xFFFFC9D2), fontSize = 11.sp
-                )
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Filtros", Modifier.weight(1f), color = Pearl,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Chip("Fechar ⌃", false, onClick = closeFilters)
-            }
-            LazyRow(Modifier.fillMaxWidth().testTag("filter_panel"),
-                horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                itemsIndexed(FilmCatalog.presets) { index, preset ->
-                    val selected = index == snapshot.film
-                    Column(
-                        Modifier.width(91.dp).glass(12.dp, selected).clickable {
-                            actions.selectFilm(index)
-                        }.padding(3.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+            var tab by rememberSaveable { mutableStateOf("Filtros") }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                listOf("Filtros", "Efeitos", "Cores", "LUTs").forEach { name ->
+                    Box(
+                        Modifier.clip(RoundedCornerShape(15.dp))
+                            .background(
+                                if (name == tab)
+                                    Brush.horizontalGradient(listOf(Color(0xFF7912C6), Violet))
+                                else Brush.horizontalGradient(
+                                    listOf(Color.Transparent, Color.Transparent)
+                                )
+                            )
+                            .clickable { tab = name }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
-                        val bmp = snapshot.filmPreviews[index]
-                        Box(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Brush.linearGradient(
-                                listOf(Color(0xFF4F285E), Color(0xFFBE7367), Color(0xFF0C0D19))
-                            )), contentAlignment = Alignment.Center) {
-                            if (bmp != null && !bmp.isRecycled) {
-                                Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop)
-                            } else Text("◉", color = VioletLight, fontSize = 22.sp)
-                        }
-                        Text(preset.name.replace("KODAK ", "Kodak ")
-                            .replace("FUJI ", "Fuji ").replace("VORTEX ", ""),
-                            fontSize = 9.sp, color = Pearl, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis)
+                        Text(
+                            name,
+                            color = if (name == tab) Pearl else Muted,
+                            fontSize = 11.sp,
+                            fontWeight = if (name == tab) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                Text("⌃", Modifier.clickable(onClick = closeFilters).padding(horizontal = 5.dp),
+                    color = Pearl, fontSize = 15.sp)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Chip("Efeitos", false) { actions.showInfo("Grão e queima no laboratório de efeitos.") }
-                Chip("Cores", false) { actions.showInfo("Cor disponível em Ajustes e WB.") }
-                Chip("LUTs", false) { actions.showInfo("Importação de LUT ainda não disponível.") }
+            if (snapshot.mode == "Vídeo") {
+                Text(
+                    "No modo Vídeo, a gravação MP4 ainda é limpa. Os perfis analógicos serão integrados ao renderizador GPU.",
+                    color = Color(0xFFFFC9D2), fontSize = 10.sp
+                )
+            }
+            when (tab) {
+                "Filtros" -> {
+                    LazyRow(
+                        Modifier.fillMaxWidth().testTag("filter_panel"),
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        itemsIndexed(FilmCatalog.presets) { index, preset ->
+                            val selected = index == snapshot.film
+                            Column(
+                                Modifier.width(42.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(
+                                        if (selected) Color(0xFF4D1769) else Color(0xD3170E20)
+                                    )
+                                    .border(
+                                        if (selected) 1.8.dp else .5.dp,
+                                        if (selected) VioletLight else Color(0x995B3D70),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { actions.selectFilm(index) }
+                                    .padding(3.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                val bmp = snapshot.filmPreviews[index]
+                                Box(
+                                    Modifier.fillMaxWidth().height(50.dp)
+                                        .clip(RoundedCornerShape(7.dp))
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(
+                                                    Color(0xFF4A1E69),
+                                                    Color(0xFFC17859),
+                                                    Color(0xFF100C19)
+                                                )
+                                            )
+                                        ), contentAlignment = Alignment.Center
+                                ) {
+                                    if (bmp != null && !bmp.isRecycled) {
+                                        Image(
+                                            bmp.asImageBitmap(), null, Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else Text("◉", color = VioletLight, fontSize = 18.sp)
+                                }
+                                Text(
+                                    preset.name.replace("KODAK ", "Kodak ")
+                                        .replace("FUJI ", "Fuji ")
+                                        .replace("VORTEX ", ""),
+                                    fontSize = 8.sp, color = Pearl,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    val preset = FilmCatalog.presets[snapshot.film.coerceIn(
+                        0, FilmCatalog.presets.lastIndex
+                    )]
+                    Text(preset.tagline, fontSize = 10.sp, color = Muted)
+                }
+                "Efeitos" -> {
+                    Text("Grão analógico", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grainStrength, 0f..3f) {
+                        actions.setFilmFx("grain", it)
+                    }
+                    Text("Vazamento / queima aleatória", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.burnChance, 0f..1f) {
+                        actions.setFilmFx("burn", it)
+                    }
+                    Chip(if (snapshot.dateStamp) "Data: ativada" else "Data: desativada",
+                        snapshot.dateStamp) {
+                        actions.setFilmFx("date", if (snapshot.dateStamp) 0f else 1f)
+                    }
+                    Text(
+                        "Efeitos aplicados ao JPEG salvo. Vazamentos aparecem ocasionalmente.",
+                        color = Muted, fontSize = 10.sp
+                    )
+                }
+                "Cores" -> {
+                    Text("Saturação", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.saturation, -1f..1f) {
+                        actions.setGrade("saturation", it)
+                    }
+                    Text("Temperatura", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.warmth, -1f..1f) {
+                        actions.setGrade("warmth", it)
+                    }
+                    Text("Contraste", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.contrast, -1f..1f) {
+                        actions.setGrade("contrast", it)
+                    }
+                }
+                else -> Text(
+                    "Importação de LUTs ainda não implementada. Nenhuma simulação falsa é aplicada.",
+                    color = Muted, fontSize = 11.sp
+                )
             }
         }
         CameraPanel.ADJUST -> {
