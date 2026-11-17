@@ -2,6 +2,18 @@
 Versão da especificação: 1.0 | Status: PROPOSTA TÉCNICA, NÃO IMPLEMENTADO
 Alvo: Kotlin + Jetpack Compose + CameraX 1.6.2/Camera2, Android minSdk 29, totalmente offline.
 
+## Requisito transversal inegociável — dois modos principais
+
+O Vortex Retro Camera é **um único aplicativo de câmera com FOTO e VÍDEO**, ambos funcionais, não dois apps e não um aplicativo apenas de vídeo. Esta especificação de vídeo é uma ampliação, não uma substituição do motor fotográfico.
+
+- **Modo FOTO:** toque no disparador captura imagem estática; permanece integrado a CameraX ImageCapture, MediaStore, FilmProcessor, filtros Kodak/Fuji/CCD, galeria, modos Pro e Noite já existentes, sem regressões.
+- **Modo VÍDEO:** toque no disparador inicia/paralisa/finaliza gravação real MP4 com CameraX VideoCapture/Recorder; efeitos de filme/câmera devem ser persistidos no arquivo, não somente mostrados na interface.
+- **Alternância:** a barra inferior mantém opções FOTO e VÍDEO claramente visíveis; transição segura entre sessões, sem reiniciar o aplicativo; a seleção corrente deve ser destacada e alterar disparador, temporizador, opções de captura e controles disponíveis.
+- **ESTÉTICA RETRÔ compartilhada:** presets acessíveis tanto em FOTO quanto em VÍDEO, com implementações adequadas à mídia: FilmProcessor JPEG para foto e pipeline GPU/Media3 para vídeo. Não prometer equivalência exata de algoritmos antes de testes lado a lado.
+- **Pro e Noite:** continuam operacionais em FOTO; em VÍDEO, expor somente o que a combinação de hardware, CameraX e pipeline efetivamente suporta. Não simular captura noturna multi-frame de foto no vídeo.
+- **Galeria:** acesso único para consultar fotos e vídeos; a miniatura representa a última mídia, sem recortes indevidos.
+- **Aceite de produto:** não considerar o projeto concluído enquanto FOTO e VÍDEO não forem capturados, salvos, abertos e testados individualmente e após alternância repetida entre os dois modos.
+
 ## 1. Objetivo
 Vídeos com aparência de película cinematográfica, filme caseiro e filmadoras dos anos 2000: resposta de cor, foco, textura, falhas temporais e áudio opcional. Diferente de um filtro de tela: os efeitos PRECISAM aparecer no MP4 salvo e ser consistentes com o visor.
 
