@@ -579,8 +579,7 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
                     .clickable(enabled = !snapshot.busy && !locked) {
                         if (isVideo) actions.toggleVideoRecording() else actions.takePhoto()
                     }
-                    .testTag("shutter_button")
-                    .then(if (isVideo) Modifier.testTag("video_record_button") else Modifier),
+                    .testTag(if (isVideo) "video_record_button" else "shutter_button"),
                 contentAlignment = Alignment.Center
             ) {
                 if (isVideo) {
