@@ -2180,6 +2180,7 @@ class MainActivity : ComponentActivity() {
 
     private fun takePhoto() {
         if (mode == Mode.VIDEO || saving || photoTimerPending) return
+        if (pendingRenders.get() >= 6) return toast("Revelando outras fotos; aguarde a fila.")
         val imageCapture = capture ?: return toast("Câmera ainda inicializando")
         if (timerSeconds > 0) {
             photoTimerPending = true
