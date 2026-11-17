@@ -173,6 +173,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        // The approved UI has an immersive viewfinder without Android's status row.
+        WindowCompat.getInsetsController(window, window.decorView)
+            .hide(WindowInsetsCompat.Type.statusBars())
         window.statusBarColor = bg
         window.navigationBarColor = bg
         savedInstanceState?.let { state ->
@@ -235,6 +238,19 @@ class MainActivity : ComponentActivity() {
                     toggleVideoRecording = { toggleVideoRecording() },
                     pauseResumeVideo = { videoRecorder.pauseOrResume() },
                     toggleVideoAudio = { toggleVideoAudio() },
+                    setFilmFx = { key, value ->
+                        if (mode == Mode.VIDEO) {
+                            toast("Os efeitos analógicos de vídeo ainda não são gravados no MP4.")
+                        } else {
+                            when (key) {
+                                "grain" -> grainStrength = value.coerceIn(0f, 3f)
+                                "burn" -> burnChance = value.coerceIn(0f, 1f)
+                                "date" -> dateStamp = value > .5f
+                            }
+                            syncCompose()
+                            scheduleFilmPreviewRefresh()
+                        }
+                    },
                     switchLens = {
                         if (videoRecorder.blocksRebind) {
                             toast("Finalize o vídeo antes de trocar de câmera.")
@@ -388,7 +404,10 @@ class MainActivity : ComponentActivity() {
             videoPhase = videoRecorder.state.phase,
             videoElapsedMs = videoRecorder.state.elapsedMs,
             videoAudioEnabled = audioForVideos,
-            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED)
+            videoReady = (mode == Mode.VIDEO && videoRecorder.state.phase != VideoPhase.FAILED),
+            grainStrength = grainStrength,
+            burnChance = burnChance,
+            dateStamp = dateStamp
         )
     }
 
@@ -1096,6 +1115,15 @@ class MainActivity : ComponentActivity() {
      * no full-resolution bitmap is retained. Artifacts/burn are disabled
      * in preview so that random defects never mislead filter selection.
      */
+    private fun scheduleFilmPreviewRefresh() {
+        if (!filterDrawerOpen || isFinishing || isDestroyed) return
+        val pending = ++filterPreviewGeneration
+        handler.postDelayed({
+            if (filterDrawerOpen && pending == filterPreviewGeneration &&
+                !isFinishing && !isDestroyed) requestFilmPreviews()
+        }, 250L)
+    }
+
     private fun requestFilmPreviews() {
         if (!filterDrawerOpen || !::previewView.isInitialized) return
         val generation = filterPreviewGeneration
@@ -1868,27 +1896,42 @@ class MainActivity : ComponentActivity() {
         // GPU color-matrix approximation. The final saved JPEG uses FilmProcessor.
         val contrast = (preset.contrast * 0.91f * (1f + photoGrade.contrast * .52f))
             .coerceIn(0.5f, 1.85f)
-        val sat = (1f + photoGrade.saturation * .70f).coerceIn(0f, 1.75f)
+        val sat = (
+            (if (preset.monochrome) 0f else preset.saturation) *
+            (1f + photoGrade.saturation * .70f)
+        ).coerceIn(0f, 1.75f)
         val desat = 1f - sat
         val offset = (1f - contrast) * 128f + preset.lift * 110f +
             photoGrade.brightness * 36f
         val warmth = photoGrade.warmth * 17f
+        val redTint = preset.shadowTintR * 40f + preset.highlightTintR * 56f
+        val greenTint = preset.shadowTintG * 40f + preset.highlightTintG * 56f
+        val blueTint = preset.shadowTintB * 40f + preset.highlightTintB * 56f
+        val fade = preset.fadedBlacks * 28f
         val colorMatrix = floatArrayOf(
             (sat + desat * .2126f) * preset.red * contrast,
             desat * .7152f * contrast,
-            desat * .0722f * contrast, 0f, offset + warmth,
+            desat * .0722f * contrast, 0f, offset + warmth + redTint + fade,
             desat * .2126f * contrast,
             (sat + desat * .7152f) * preset.green * contrast,
-            desat * .0722f * contrast, 0f, offset,
+            desat * .0722f * contrast, 0f, offset + greenTint + fade,
             desat * .2126f * contrast,
             desat * .7152f * contrast,
-            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth,
+            (sat + desat * .0722f) * preset.blue * contrast, 0f, offset - warmth + blueTint + fade,
             0f, 0f, 0f, 1f, 0f
         )
         try {
-            previewView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply {
-                colorFilter = ColorMatrixColorFilter(colorMatrix)
-            })
+            val filter = ColorMatrixColorFilter(colorMatrix)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                previewView.setRenderEffect(
+                    android.graphics.RenderEffect.createColorFilterEffect(filter)
+                )
+            } else {
+                // CameraX runs PreviewView COMPATIBLE (TextureView) for pre-31 devices.
+                previewView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply {
+                    colorFilter = filter
+                })
+            }
         } catch (_: RuntimeException) {
             previewView.setLayerType(View.LAYER_TYPE_NONE, null)
         }
@@ -1946,6 +1989,10 @@ class MainActivity : ComponentActivity() {
         try {
             val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
             if (mode == Mode.VIDEO) {
+                // Photo preview grading must not masquerade as a recorded-video effect.
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S)
+                    previewView.setRenderEffect(null)
+                previewView.setLayerType(View.LAYER_TYPE_NONE, null)
                 // CameraX guarantees Preview + VideoCapture on supported cameras.
                 // Avoid ImageAnalysis and Photo use cases here; the three-way
                 // combination can fail on older hardware.
@@ -2047,6 +2094,7 @@ class MainActivity : ComponentActivity() {
             }
             capture = photo
             activeCamera = bound
+            if (composeInstalled) updateFilm()
             zoomRatio = zoomRatio.coerceIn(
                 bound.cameraInfo.zoomState.value?.minZoomRatio ?: 1f,
                 bound.cameraInfo.zoomState.value?.maxZoomRatio ?: 1f
