@@ -187,13 +187,13 @@ fun VortexCameraScreen(
                 Branding(compact = compact, actions = actions,
                     onSpec = { toggle(CameraPanel.SPEC) },
                     onAi = { toggle(CameraPanel.AI) })
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Chip("AUTO MP  |  4:3  |  JPEG  ⌄", selected = panel == CameraPanel.SPEC,
+                    Chip(if (snapshot.mode == "Vídeo") "HD  |  SDR  |  MP4  ⌄" else "AUTO MP  |  4:3  |  JPEG  ⌄", selected = panel == CameraPanel.SPEC,
                         modifier = Modifier.testTag("capture_spec")) { toggle(CameraPanel.SPEC) }
                     RgbHistogram(snapshot.histogram)
                 }
@@ -240,9 +240,9 @@ fun VortexCameraScreen(
                     }
                 }
                 FloatingToolbar(snapshot, onChoose = { toggle(it) }, actions = actions)
-                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
                 ShutterDock(gallery, snapshot, actions, compact = compact)
-                Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+                Spacer(Modifier.height(if (compact) 2.dp else 6.dp))
                 ModeNavigation(snapshot, actions, compact = compact,
                     onRetro = { toggle(CameraPanel.FILTERS) })
             }
@@ -279,59 +279,83 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
     onSpec: () -> Unit,
     onAi: () -> Unit
 ) {
+    // Balanced for 360dp-wide screens, following the approved visual reference.
     Row(
-        Modifier.fillMaxWidth().height(if (compact) 44.dp else 52.dp),
+        Modifier.fillMaxWidth().height(if (compact) 40.dp else 44.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        VortexMark(Modifier.size(37.dp))
+        VortexMark(Modifier.size(if (compact) 29.dp else 33.dp))
         Text(
-            "Vortex Camera", color = Pearl, fontWeight = FontWeight.Bold,
-            fontSize = if (compact) 15.sp else 18.sp,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+            "Vortex Camera", color = Pearl, fontWeight = FontWeight.SemiBold,
+            fontSize = if (compact) 13.sp else 15.sp,
+            maxLines = 1, softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
-        Box(Modifier.glass(8.dp, active = true).clickable {
-            actions.chooseMode("Pro")
-        }.padding(horizontal = 8.dp, vertical = 5.dp)) {
-            Text("Pro", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Box(
+            Modifier.clip(RoundedCornerShape(7.dp))
+                .background(Brush.horizontalGradient(listOf(Color(0xFF54018C), Violet)))
+                .clickable { actions.chooseMode("Pro") }
+                .padding(horizontal = 7.dp, vertical = 4.dp)
+        ) {
+            Text("Pro", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
-        if (!compact) Spacer(Modifier.width(5.dp))
-        TopAction("HDR") { actions.showInfo("HDR ainda não possui processamento implementado.") }
+        Spacer(Modifier.width(1.dp))
+        TopAction("HDR") { actions.showInfo("HDR em desenvolvimento.") }
         TopAction("✦AI", onAi)
-        TopAction("⚙") { actions.showInfo("Configurações avançadas disponíveis nas barras inferiores.") }
+        TopAction("⚙") {
+            actions.showInfo("Configurações: utilize o painel de Ajustes e Pro.")
+        }
     }
 }
 
 @Composable private fun VortexMark(modifier: Modifier = Modifier) {
     Canvas(modifier) {
-        val radius = size.minDimension * .40f
+        val outer = size.minDimension * .49f
+        // Six optical blades produce the rotating iris logo of the approved reference.
         repeat(6) { i ->
             rotate(i * 60f, center) {
                 val p = Path().apply {
-                    moveTo(center.x, center.y)
-                    cubicTo(center.x - radius * .8f, center.y - radius * .15f,
-                        center.x - radius * .7f, center.y - radius,
-                        center.x + radius * .2f, center.y - radius)
-                    cubicTo(center.x + radius * .7f, center.y - radius * .8f,
-                        center.x + radius * .65f, center.y - radius * .2f,
-                        center.x, center.y)
+                    moveTo(center.x + outer * .09f, center.y + outer * .13f)
+                    cubicTo(
+                        center.x - outer * .50f, center.y - outer * .05f,
+                        center.x - outer * .67f, center.y - outer * .60f,
+                        center.x - outer * .25f, center.y - outer * .98f
+                    )
+                    cubicTo(
+                        center.x + outer * .22f, center.y - outer * 1.12f,
+                        center.x + outer * .80f, center.y - outer * .59f,
+                        center.x + outer * .59f, center.y - outer * .35f
+                    )
+                    cubicTo(
+                        center.x + outer * .40f, center.y - outer * .12f,
+                        center.x + outer * .20f, center.y - outer * .01f,
+                        center.x + outer * .09f, center.y + outer * .13f
+                    )
                     close()
                 }
-                drawPath(p, Brush.linearGradient(listOf(VioletLight, Violet, Color(0xFF3F0784))))
+                drawPath(p,
+                    Brush.linearGradient(
+                        listOf(Color(0xFFE7A8FF), Color(0xFF9C14EB), Color(0xFF41006F))
+                    )
+                )
             }
         }
-        drawCircle(Color(0xFF17051E), radius * .18f)
+        drawCircle(Color(0xFF120419), outer * .16f)
     }
 }
 
 @Composable private fun TopAction(title: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(width = if (title == "HDR") 47.dp else 44.dp, height = 39.dp)
-            .glass(13.dp).clickable(onClick = onClick),
+        Modifier.size(width = if (title == "HDR") 37.dp else 34.dp, height = 33.dp)
+            .glass(12.dp).clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(title, color = Pearl, fontSize = if (title == "HDR") 12.sp else 17.sp,
-            fontWeight = FontWeight.SemiBold)
+        Text(title, color = Pearl,
+            fontSize = when (title) { "HDR" -> 11.sp; "✦AI" -> 12.sp; else -> 17.sp },
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
