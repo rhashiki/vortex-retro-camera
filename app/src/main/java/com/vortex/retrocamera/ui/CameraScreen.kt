@@ -88,7 +88,10 @@ data class CameraUiSnapshot(
     val videoPhase: VideoPhase = VideoPhase.IDLE,
     val videoElapsedMs: Long = 0,
     val videoAudioEnabled: Boolean = false,
-    val videoReady: Boolean = false
+    val videoReady: Boolean = false,
+    val grainStrength: Float = 1.6f,
+    val burnChance: Float = .16f,
+    val dateStamp: Boolean = false
 )
 
 /**
@@ -114,7 +117,8 @@ data class CameraUiActions(
     val showInfo: (String) -> Unit,
     val toggleVideoRecording: () -> Unit,
     val pauseResumeVideo: () -> Unit,
-    val toggleVideoAudio: () -> Unit
+    val toggleVideoAudio: () -> Unit,
+    val setFilmFx: (String, Float) -> Unit
 )
 
 private enum class CameraPanel { SPEC, AI, WB, FILTERS, ADJUST, FOCUS, PRO, EFFECTS }
@@ -680,48 +684,138 @@ private fun Modifier.glass(radius: Dp = 20.dp, active: Boolean = false): Modifie
             }
         }
         CameraPanel.FILTERS -> {
-            if (snapshot.mode == "Vídeo") {
-                Text(
-                    "Os filtros de vídeo serão aplicados ao MP4 na fase GPU. Nesta versão, a gravação é original, sem efeitos.",
-                    color = Color(0xFFFFC9D2), fontSize = 11.sp
-                )
-            }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Filtros", Modifier.weight(1f), color = Pearl,
-                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Chip("Fechar ⌃", false, onClick = closeFilters)
-            }
-            LazyRow(Modifier.fillMaxWidth().testTag("filter_panel"),
-                horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                itemsIndexed(FilmCatalog.presets) { index, preset ->
-                    val selected = index == snapshot.film
-                    Column(
-                        Modifier.width(91.dp).glass(12.dp, selected).clickable {
-                            actions.selectFilm(index)
-                        }.padding(3.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
+            var tab by rememberSaveable { mutableStateOf("Filtros") }
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                listOf("Filtros", "Efeitos", "Cores", "LUTs").forEach { name ->
+                    Box(
+                        Modifier.clip(RoundedCornerShape(15.dp))
+                            .background(
+                                if (name == tab)
+                                    Brush.horizontalGradient(listOf(Color(0xFF7912C6), Violet))
+                                else Brush.horizontalGradient(
+                                    listOf(Color.Transparent, Color.Transparent)
+                                )
+                            )
+                            .clickable { tab = name }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
-                        val bmp = snapshot.filmPreviews[index]
-                        Box(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Brush.linearGradient(
-                                listOf(Color(0xFF4F285E), Color(0xFFBE7367), Color(0xFF0C0D19))
-                            )), contentAlignment = Alignment.Center) {
-                            if (bmp != null && !bmp.isRecycled) {
-                                Image(bmp.asImageBitmap(), null, Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop)
-                            } else Text("◉", color = VioletLight, fontSize = 22.sp)
-                        }
-                        Text(preset.name.replace("KODAK ", "Kodak ")
-                            .replace("FUJI ", "Fuji ").replace("VORTEX ", ""),
-                            fontSize = 9.sp, color = Pearl, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis)
+                        Text(
+                            name,
+                            color = if (name == tab) Pearl else Muted,
+                            fontSize = 11.sp,
+                            fontWeight = if (name == tab) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
                 }
+                Spacer(Modifier.weight(1f))
+                Text("⌃", Modifier.clickable(onClick = closeFilters).padding(horizontal = 5.dp),
+                    color = Pearl, fontSize = 15.sp)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                Chip("Efeitos", false) { actions.showInfo("Grão e queima no laboratório de efeitos.") }
-                Chip("Cores", false) { actions.showInfo("Cor disponível em Ajustes e WB.") }
-                Chip("LUTs", false) { actions.showInfo("Importação de LUT ainda não disponível.") }
+            if (snapshot.mode == "Vídeo") {
+                Text(
+                    "No modo Vídeo, a gravação MP4 ainda é limpa. Os perfis analógicos serão integrados ao renderizador GPU.",
+                    color = Color(0xFFFFC9D2), fontSize = 10.sp
+                )
+            }
+            when (tab) {
+                "Filtros" -> {
+                    LazyRow(
+                        Modifier.fillMaxWidth().testTag("filter_panel"),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        itemsIndexed(FilmCatalog.presets) { index, preset ->
+                            val selected = index == snapshot.film
+                            Column(
+                                Modifier.width(73.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (selected) Color(0xFF4D1769) else Color(0xD3170E20)
+                                    )
+                                    .border(
+                                        if (selected) 1.8.dp else .5.dp,
+                                        if (selected) VioletLight else Color(0x995B3D70),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { actions.selectFilm(index) }
+                                    .padding(3.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                val bmp = snapshot.filmPreviews[index]
+                                Box(
+                                    Modifier.fillMaxWidth().height(63.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(
+                                                    Color(0xFF4A1E69),
+                                                    Color(0xFFC17859),
+                                                    Color(0xFF100C19)
+                                                )
+                                            )
+                                        ), contentAlignment = Alignment.Center
+                                ) {
+                                    if (bmp != null && !bmp.isRecycled) {
+                                        Image(
+                                            bmp.asImageBitmap(), null, Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    } else Text("◉", color = VioletLight, fontSize = 18.sp)
+                                }
+                                Text(
+                                    preset.name.replace("KODAK ", "Kodak ")
+                                        .replace("FUJI ", "Fuji ")
+                                        .replace("VORTEX ", ""),
+                                    fontSize = 9.sp, color = Pearl,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    val preset = FilmCatalog.presets[snapshot.film.coerceIn(
+                        0, FilmCatalog.presets.lastIndex
+                    )]
+                    Text(preset.tagline, fontSize = 10.sp, color = Muted)
+                }
+                "Efeitos" -> {
+                    Text("Grão analógico", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grainStrength, 0f..3f) {
+                        actions.setFilmFx("grain", it)
+                    }
+                    Text("Vazamento / queima aleatória", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.burnChance, 0f..1f) {
+                        actions.setFilmFx("burn", it)
+                    }
+                    Chip(if (snapshot.dateStamp) "Data: ativada" else "Data: desativada",
+                        snapshot.dateStamp) {
+                        actions.setFilmFx("date", if (snapshot.dateStamp) 0f else 1f)
+                    }
+                    Text(
+                        "Efeitos aplicados ao JPEG salvo. Vazamentos aparecem ocasionalmente.",
+                        color = Muted, fontSize = 10.sp
+                    )
+                }
+                "Cores" -> {
+                    Text("Saturação", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.saturation, -1f..1f) {
+                        actions.setGrade("saturation", it)
+                    }
+                    Text("Temperatura", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.warmth, -1f..1f) {
+                        actions.setGrade("warmth", it)
+                    }
+                    Text("Contraste", color = Pearl, fontSize = 11.sp)
+                    PurpleSlider(snapshot.grade.contrast, -1f..1f) {
+                        actions.setGrade("contrast", it)
+                    }
+                }
+                else -> Text(
+                    "Importação de LUTs ainda não implementada. Nenhuma simulação falsa é aplicada.",
+                    color = Muted, fontSize = 11.sp
+                )
             }
         }
         CameraPanel.ADJUST -> {
