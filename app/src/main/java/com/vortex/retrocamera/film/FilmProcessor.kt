@@ -125,10 +125,11 @@ object FilmProcessor {
 
                 // Apply color grading before film-light leaks; the effect remains
                 // part of the photograph rather than a separate UI-only filter.
+                val neutralLook = preset.name == "ORIGINAL"
                 ColorGrader.apply(
-                    channel(sourceR, preset.red, preset, grain, darkening),
-                    channel(sourceG, preset.green, preset, grain, darkening),
-                    channel(sourceB, preset.blue, preset, grain, darkening),
+                    if (neutralLook) sourceR else channel(sourceR, preset.red, preset, grain, darkening),
+                    if (neutralLook) sourceG else channel(sourceG, preset.green, preset, grain, darkening),
+                    if (neutralLook) sourceB else channel(sourceB, preset.blue, preset, grain, darkening),
                     grade, graded
                 )
                 var r = graded[0]
