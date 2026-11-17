@@ -119,7 +119,9 @@ object FilmProcessor {
                 val grainFalloff = 0.42f + 1.13f * (1f - luminance) * (0.4f + luminance)
                 val grain = (noise1 * 0.76f + noise2 * 0.24f) *
                     preset.grain * intensity * grainFalloff
-                val darkening = 1f - preset.vignette * falloff.pow(1.7f)
+                // Approximate r^1.7 without per-pixel Math.pow (millions of pixels).
+                val falloff17 = falloff * falloff * (1.7f - 0.7f * falloff)
+                val darkening = 1f - preset.vignette * falloff17
 
                 // Apply color grading before film-light leaks; the effect remains
                 // part of the photograph rather than a separate UI-only filter.
@@ -132,6 +134,25 @@ object FilmProcessor {
                 var r = graded[0]
                 var g = graded[1]
                 var b = graded[2]
+
+                // Film-specific split toning and saturation are applied to the
+                // actual exported pixels, not just to a decorative preview tint.
+                val l = (r * 0.2126f + g * 0.7152f + b * 0.0722f)
+                    .coerceIn(0f, 1f)
+                val filmSat = if (preset.monochrome) 0f else preset.saturation
+                r = l + (r - l) * filmSat
+                g = l + (g - l) * filmSat
+                b = l + (b - l) * filmSat
+                val shadows = (1f - l) * (1f - l)
+                val lights = l * l
+                r += preset.shadowTintR * shadows + preset.highlightTintR * lights
+                g += preset.shadowTintG * shadows + preset.highlightTintG * lights
+                b += preset.shadowTintB * shadows + preset.highlightTintB * lights
+                // Slightly lifted dark tones mimic older emulsions.
+                val fade = preset.fadedBlacks.coerceIn(0f, .3f)
+                r = r * (1f - fade * .38f) + fade * .31f
+                g = g * (1f - fade * .38f) + fade * .31f
+                b = b * (1f - fade * .38f) + fade * .31f
 
                 if (plan.burn) {
                     val edge = if (plan.fromLeft) x.toFloat() / width
