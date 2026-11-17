@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity() {
     private var lensFacing = CameraSelector.LENS_FACING_BACK
     private var timerSeconds = 0
     private var saving = false
+    private var photoTimerPending = false
     private var capture: ImageCapture? = null
     private var activeCamera: Camera? = null
     private var manual: ManualCamera? = null
@@ -409,7 +410,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleVideoRecording() {
-        if (mode != Mode.VIDEO) return
+        if (mode != Mode.VIDEO || saving || photoTimerPending) return
         when (videoRecorder.state.phase) {
             VideoPhase.PREPARING, VideoPhase.RECORDING, VideoPhase.PAUSED ->
                 videoRecorder.stop()
@@ -1696,6 +1697,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun setMode(next: Mode) {
+        if ((saving || photoTimerPending) && next != mode) {
+            toast("Aguarde a fotografia atual terminar.")
+            return
+        }
         if (videoRecorder.blocksRebind && next != mode) {
             toast("Encerre e salve o vídeo antes de mudar de modo.")
             return
@@ -2110,12 +2115,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun takePhoto() {
-        if (saving) return
+        if (mode == Mode.VIDEO || saving || photoTimerPending) return
         val imageCapture = capture ?: return toast("Câmera ainda inicializando")
         if (timerSeconds > 0) {
+            photoTimerPending = true
             saveLabel.text = "TEMPORIZADOR · ${timerSeconds}s"
             shutterButton.isEnabled = false
-            handler.postDelayed({ shutterButton.isEnabled = true; captureNow(imageCapture) }, timerSeconds * 1000L)
+            if (composeInstalled) composeState.value = composeState.value.copy(busy = true)
+            handler.postDelayed({
+                photoTimerPending = false
+                if (!isDestroyed && !isFinishing &&
+                    (mode == Mode.FOTO || mode == Mode.PRO)) {
+                    shutterButton.isEnabled = true
+                    captureNow(imageCapture)
+                }
+            }, timerSeconds * 1000L)
         } else captureNow(imageCapture)
     }
 
@@ -2338,6 +2352,13 @@ class MainActivity : ComponentActivity() {
         }
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+
+    override fun onStop() {
+        // Do not leave a recorder active when Android sends the camera to background.
+        if (videoRecorder.blocksRebind && videoRecorder.state.phase != VideoPhase.FINALIZING)
+            videoRecorder.stop()
+        super.onStop()
+    }
 
     override fun onResume() {
         super.onResume()
